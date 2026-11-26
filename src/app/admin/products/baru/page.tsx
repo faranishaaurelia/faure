@@ -11,10 +11,10 @@ export default async function AdminNewProductPage() {
     .order("name");
 
   return (
-    <div>
+    <div className="pb-2">
       <Link
         href="/admin/products"
-        className="inline-flex items-center gap-1.5 mb-5 text-[12px] font-medium text-[#8B6B5A] hover:text-[#1E1C18] transition"
+        className="mb-5 inline-flex items-center gap-1.5 text-[12px] font-medium text-[#8B6B5A] transition hover:text-[#1E1C18]"
       >
         <span aria-hidden>←</span> Kembali ke daftar produk
       </Link>
@@ -22,7 +22,7 @@ export default async function AdminNewProductPage() {
       <AdminPageHeader
         kicker="Koleksi"
         title="Tambah Produk"
-        description="Isi informasi, foto, dan varian stok. Slug dibuat otomatis dari nama produk."
+        description="Lengkapi informasi, galeri foto, dan varian stok sebelum produk tampil di toko."
       />
       <ProductForm categories={categories ?? []} />
     </div>

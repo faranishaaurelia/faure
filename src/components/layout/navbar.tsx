@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import LanguageSwitcher from "@/components/i18n/LanguageSwitcher";
 import { useI18n } from "@/components/i18n/LocaleProvider";
@@ -10,7 +10,6 @@ import type { User } from "@supabase/supabase-js";
 
 export default function Navbar() {
   const pathname = usePathname();
-  const router = useRouter();
   const { t } = useI18n();
   const [user, setUser] = useState<User | null>(null);
   const menu = [
@@ -38,14 +37,31 @@ export default function Navbar() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  // Logout dilakukan di client (bukan server action) supaya sesi client
-  // benar-benar dibersihkan & onAuthStateChange langsung meng-update state
-  // navbar ke kondisi "belum login".
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/");
-    router.refresh();
-  }
+  // Muat ulang data user (termasuk foto profil) dari server supaya navbar
+  // ikut berubah setelah user mengganti foto / nama di halaman profil.
+  useEffect(() => {
+    const muatUlang = () => {
+      supabase.auth.getUser().then(({ data }) => {
+        if (data.user) setUser(data.user);
+      });
+    };
+
+    const saatTabAktif = () => {
+      if (document.visibilityState === "visible") muatUlang();
+    };
+
+    // Saat pindah halaman
+    muatUlang();
+
+    // Saat tab dibuka kembali, atau ada sinyal dari halaman profil
+    document.addEventListener("visibilitychange", saatTabAktif);
+    window.addEventListener("faure-profile-updated", muatUlang);
+
+    return () => {
+      document.removeEventListener("visibilitychange", saatTabAktif);
+      window.removeEventListener("faure-profile-updated", muatUlang);
+    };
+  }, [supabase, pathname]);
 
   /*
    * Menerima event dari AddToCartForm
@@ -76,6 +92,9 @@ export default function Navbar() {
     user?.user_metadata?.full_name?.charAt(0)?.toUpperCase() ||
     user?.email?.charAt(0)?.toUpperCase() ||
     "?";
+
+  const avatarUrl: string =
+    (user?.user_metadata?.avatar_url as string | undefined) ?? "";
 
   return (
     <header
@@ -144,7 +163,7 @@ export default function Navbar() {
                     name="q"
                     placeholder={t("nav.searchPlaceholder")}
                     autoFocus
-                    className="w-full h-10 px-3 rounded-lg border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#1E1C18]"
+                    className="w-full h-10 px-3 rounded-lg border border-[#E7E5E0] bg-white text-sm text-black placeholder:text-[#8B8478] focus:outline-none focus:border-[#1E1C18]"
                   />
                 </form>
               )}
@@ -193,39 +212,25 @@ export default function Navbar() {
                 {/* PROFILE */}
                 <Link
                   href="/profile"
+                  prefetch={false}
                   aria-label={t("nav.profile")}
                   className={`w-9 h-9 rounded-full overflow-hidden border border-[#E7E5E0] shrink-0 flex items-center justify-center ${
                     pathname === "/profile" ? "ring-2 ring-[#1E1C18]" : ""
                   }`}
                 >
-                  <span className="w-full h-full bg-[#1E1C18] text-white text-xs font-semibold flex items-center justify-center">
-                    {initial}
-                  </span>
+                  {avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={avatarUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="w-full h-full bg-[#1E1C18] text-white text-xs font-semibold flex items-center justify-center">
+                      {initial}
+                    </span>
+                  )}
                 </Link>
-
-                {/* LOGOUT */}
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  aria-label={t("nav.logout")}
-                  title={t("nav.logout")}
-                  className="p-2 rounded-[8px] transition-all duration-200 text-[#222] hover:bg-[#1E1C18]/10"
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <path d="M16 17l5-5-5-5" />
-                    <path d="M21 12H9" />
-                  </svg>
-                </button>
               </div>
             ) : (
               <div className="hidden sm:flex items-center gap-2 text-[11px] tracking-wide uppercase text-[#222]">
@@ -236,19 +241,6 @@ export default function Navbar() {
                   }`}
                 >
                   {t("nav.login")}
-                </Link>
-
-                <span className="text-gray-400">|</span>
-
-                <Link
-                  href="/register"
-                  className={`hover:text-[#1E1C18] transition-colors ${
-                    pathname === "/register"
-                      ? "font-semibold text-[#1E1C18]"
-                      : ""
-                  }`}
-                >
-                  {t("nav.register")}
                 </Link>
               </div>
             )}

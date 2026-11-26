@@ -34,10 +34,12 @@ const MAKS_ITEM = 2;
 export default async function PesananPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; page?: string }>;
 }) {
-  const { status } = await searchParams;
+  const { status, page } = await searchParams;
   const { t, locale } = await getT();
+
+  const halaman = Math.max(1, parseInt(page ?? "1", 10) || 1);
 
   const supabase = await createClient();
 
@@ -102,6 +104,45 @@ export default async function PesananPage({
       ? semuaPesanan
       : semuaPesanan.filter((p) => infoStatus(p.status).key === tabAktif);
 
+  // ---------- Pagination: 3 pesanan per halaman ----------
+  const PESANAN_PER_HALAMAN = 3;
+  const totalHalaman = Math.max(
+    1,
+    Math.ceil(pesananTampil.length / PESANAN_PER_HALAMAN),
+  );
+  const halamanValid = Math.min(halaman, totalHalaman);
+  const mulai = (halamanValid - 1) * PESANAN_PER_HALAMAN;
+  const pesananHalaman = pesananTampil.slice(
+    mulai,
+    mulai + PESANAN_PER_HALAMAN,
+  );
+
+  // Link ke halaman lain, mempertahankan filter status yang aktif.
+  function hrefHalaman(h: number) {
+    const sp = new URLSearchParams();
+    if (tabAktif !== "semua") sp.set("status", tabAktif);
+    if (h > 1) sp.set("page", String(h));
+    const qs = sp.toString();
+    return `/pesanan${qs ? `?${qs}` : ""}`;
+  }
+
+  // Nomor halaman ringkas: 1 ... 4 5 6 ... 12 (kalau halamannya banyak)
+  function daftarHalaman(total: number, aktif: number): (number | "...")[] {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+    const nomor = new Set<number>([1, total, aktif - 1, aktif, aktif + 1]);
+    const urut = [...nomor]
+      .filter((n) => n >= 1 && n <= total)
+      .sort((a, b) => a - b);
+
+    const hasil: (number | "...")[] = [];
+    urut.forEach((n, i, arr) => {
+      if (i > 0 && n - arr[i - 1] > 1) hasil.push("...");
+      hasil.push(n);
+    });
+    return hasil;
+  }
+
   return (
     <div>
         <div>
@@ -154,7 +195,10 @@ export default async function PesananPage({
           </nav>
 
           {/* ===================== DAFTAR ===================== */}
-          <div className="mt-6 space-y-4">
+          <div
+            className="mt-6 space-y-4 overflow-y-auto pr-1 inner-scroll"
+            style={{ height: "min(680px, calc(100dvh - 220px))" }}
+          >
             {error ? (
               <div className="bg-white rounded-[24px] border border-black/5 shadow-sm px-6 py-12 text-center">
                 <p className="text-sm font-medium">{t("account.loadFail")}</p>
@@ -185,7 +229,8 @@ export default async function PesananPage({
                 </Link>
               </div>
             ) : (
-              pesananTampil.map((p) => {
+              <>
+                {pesananHalaman.map((p) => {
                 const info = infoStatus(p.status, t);
                 const bayar = infoPembayaran(p.payment_status, info.key, t);
                 const items = (p.order_items ?? []).map((i) => infoItem(i, t));
@@ -296,9 +341,83 @@ export default async function PesananPage({
                     </footer>
                   </article>
                 );
-              })
-            )}
-          </div>
+              })}
+
+              {/* PAGINATION */}
+              {totalHalaman > 1 && (
+                <nav
+                  aria-label={t("account.pageOf", {
+                    current: halamanValid,
+                    total: totalHalaman,
+                  })}
+                  className="pt-2 flex flex-col items-center gap-3.5"
+                >
+                  <p className="text-[11px] text-[#8B8478]">
+                    {t("account.pageOf", {
+                      current: halamanValid,
+                      total: totalHalaman,
+                    })}
+                  </p>
+
+                  <div className="flex items-center gap-1.5">
+                    <Link
+                      href={hrefHalaman(halamanValid - 1)}
+                      aria-disabled={halamanValid <= 1}
+                      aria-label={t("account.previousPage")}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-[12px] transition ${
+                        halamanValid <= 1
+                          ? "pointer-events-none border-[#E7E5E0] text-[#C8C1B8]"
+                          : "border-[#DDD8D2] text-[#5F5953] hover:border-[#1A1A1A]"
+                      }`}
+                    >
+                      ←
+                    </Link>
+
+                    {daftarHalaman(totalHalaman, halamanValid).map(
+                      (item, i) =>
+                        item === "..." ? (
+                          <span
+                            key={`gap-${i}`}
+                            className="inline-flex h-9 min-w-6 items-center justify-center px-0.5 text-[12px] text-[#B3ACA4]"
+                          >
+                            …
+                          </span>
+                        ) : (
+                          <Link
+                            key={item}
+                            href={hrefHalaman(item)}
+                            aria-current={
+                              item === halamanValid ? "page" : undefined
+                            }
+                            className={`inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-1.5 text-[12px] font-medium transition ${
+                              item === halamanValid
+                                ? "border-[#1A1A1A] bg-[#1A1A1A] text-white"
+                                : "border-[#DDD8D2] text-[#5F5953] hover:border-[#1A1A1A]"
+                            }`}
+                          >
+                            {item}
+                          </Link>
+                        ),
+                    )}
+
+                    <Link
+                      href={hrefHalaman(halamanValid + 1)}
+                      aria-disabled={halamanValid >= totalHalaman}
+                      aria-label={t("account.nextPage")}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-[12px] transition ${
+                        halamanValid >= totalHalaman
+                          ? "pointer-events-none border-[#E7E5E0] text-[#C8C1B8]"
+                          : "border-[#DDD8D2] text-[#5F5953] hover:border-[#1A1A1A]"
+                      }`}
+                    >
+                      →
+                    </Link>
+                  </div>
+                </nav>
+              )}
+            </>
+          )}
+        </div>
         </div>
     </div>
   );

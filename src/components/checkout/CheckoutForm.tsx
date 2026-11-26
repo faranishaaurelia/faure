@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Address } from "@/lib/addresses";
 import { createOrder } from "@/lib/actions/orders";
+import { bayarDenganSnap } from "@/lib/snap-client";
 import { useI18n } from "@/components/i18n/LocaleProvider";
 
 // =====================================================
@@ -23,6 +24,10 @@ export type CheckoutItem = {
 
 // Voucher contoh (kode -> persen diskon)
 const voucherContoh: Record<string, number> = { FAURE10: 10 };
+
+type Langkah = 1 | 2 | 3;
+type StatusForm = "sudah" | "belum" | "perlu";
+type Terjemah = (key: string, vars?: Record<string, string | number>) => string;
 
 // =====================================================
 // HELPER
@@ -47,18 +52,154 @@ const inputClass = (error?: string) => `
   ${error ? "border-[#B3261E]" : "border-[#DDD8D2]"}
 `;
 
+function statusTeks(status: StatusForm, t: Terjemah) {
+  if (status === "sudah") return t("checkout.filled");
+  if (status === "perlu") return t("checkout.needsFix");
+  return t("checkout.notFilled");
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-3 h-3">
+      <path
+        d="M4.5 10.5L8 14L15.5 6.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // =====================================================
 // KOMPONEN KECIL
 // =====================================================
 
-function SectionTitle({ no, judul }: { no: number; judul: string }) {
+function StatusBadge({ status }: { status: StatusForm }) {
+  const { t } = useI18n();
+  const warna =
+    status === "sudah"
+      ? "bg-[#E8F2E9] text-[#2E6B3F]"
+      : status === "perlu"
+        ? "bg-[#FFF3DF] text-[#8A5A16]"
+        : "bg-[#F2EFEB] text-[#6F6A65]";
+  const titik =
+    status === "sudah"
+      ? "bg-[#2E6B3F]"
+      : status === "perlu"
+        ? "bg-[#8A5A16]"
+        : "bg-[#8B8478]";
+
   return (
-    <div className="flex items-center gap-3 mb-6">
-      <span className="w-6 h-6 rounded-full bg-[#1A1A1A] text-white flex items-center justify-center text-[10px]">
-        {no}
-      </span>
-      <h2 className="text-sm font-medium">{judul}</h2>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] ${warna}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${titik}`} />
+      {statusTeks(status, t)}
+    </span>
+  );
+}
+
+function StepHeader({
+  no,
+  judul,
+  status,
+}: {
+  no: number;
+  judul: string;
+  status: StatusForm;
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <span
+          className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium ${
+            status === "sudah"
+              ? "bg-[#1A1A1A] text-white"
+              : "border border-[#CFC9C2] text-[#6F6A65]"
+          }`}
+        >
+          {status === "sudah" ? <CheckIcon /> : no}
+        </span>
+        <h2 className="text-sm font-medium">{judul}</h2>
+      </div>
+      <StatusBadge status={status} />
     </div>
+  );
+}
+
+function Stepper({
+  langkah,
+  statuses,
+  bisaBuka,
+  onPilih,
+}: {
+  langkah: Langkah;
+  statuses: StatusForm[];
+  bisaBuka: (no: Langkah) => boolean;
+  onPilih: (no: Langkah) => void;
+}) {
+  const { t } = useI18n();
+  const daftar = [
+    { no: 1 as Langkah, judul: t("checkout.address") },
+    { no: 2 as Langkah, judul: t("checkout.shipping") },
+    { no: 3 as Langkah, judul: t("checkout.payment") },
+  ];
+
+  return (
+    <nav aria-label={t("checkout.title")} className="mt-8">
+      <ol className="grid gap-2 sm:grid-cols-3">
+        {daftar.map(({ no, judul }, i) => {
+          const aktif = langkah === no;
+          const selesai = statuses[i] === "sudah";
+          const dibuka = no <= langkah || bisaBuka(no);
+
+          return (
+            <li key={no}>
+              <button
+                type="button"
+                disabled={!dibuka}
+                onClick={() => onPilih(no)}
+                className={`
+                  w-full rounded-xl border px-4 py-3 text-left transition
+                  ${
+                    aktif
+                      ? "border-[#1A1A1A] bg-[#1A1A1A] text-white"
+                      : "border-[#EAE7E3] bg-[#FAF8F5] text-[#1A1A1A] hover:border-[#1A1A1A]"
+                  }
+                  ${dibuka ? "cursor-pointer" : "cursor-not-allowed opacity-50"}
+                `}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span
+                    className={`h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-medium ${
+                      aktif
+                        ? "bg-white text-[#1A1A1A]"
+                        : selesai
+                          ? "bg-[#1A1A1A] text-white"
+                          : "border border-[#CFC9C2] text-[#6F6A65]"
+                    }`}
+                  >
+                    {selesai && !aktif ? <CheckIcon /> : no}
+                  </span>
+                  <span className="truncate text-xs font-medium">{judul}</span>
+                </span>
+                <span
+                  className={`mt-2 block text-[10px] ${
+                    aktif ? "text-white/70" : "text-[#8A8178]"
+                  }`}
+                >
+                  {aktif
+                    ? t("checkout.currentStep")
+                    : statusTeks(statuses[i], t)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -201,8 +342,12 @@ export default function CheckoutForm({
   );
   const [errorAlamat, setErrorAlamat] = useState("");
 
-  const [pengiriman, setPengiriman] = useState("reguler");
-  const [pembayaran, setPembayaran] = useState("qris");
+  // Pengiriman & pembayaran dipilih oleh user di langkah masing-masing
+  const [pengiriman, setPengiriman] = useState<string | null>(null);
+  const [pembayaran, setPembayaran] = useState<string | null>(null);
+
+  const [langkah, setLangkah] = useState<Langkah>(1);
+  const [errorLangkah, setErrorLangkah] = useState("");
 
   const [kodeVoucher, setKodeVoucher] = useState("");
   const [voucher, setVoucher] = useState<{
@@ -216,7 +361,19 @@ export default function CheckoutForm({
   const [pesanError, setPesanError] = useState("");
 
   const alamat = addresses.find((a) => a.id === alamatId) ?? null;
-  const alamatBelumLengkap = alamat ? !alamatLengkap(alamat) : false;
+
+  const statusAlamat: StatusForm = !alamat
+    ? "belum"
+    : alamatLengkap(alamat)
+      ? "sudah"
+      : "perlu";
+  const statusPengiriman: StatusForm = pengiriman ? "sudah" : "belum";
+  const statusPembayaran: StatusForm = pembayaran ? "sudah" : "belum";
+  const statuses: StatusForm[] = [
+    statusAlamat,
+    statusPengiriman,
+    statusPembayaran,
+  ];
 
   const labelOpsi = (a: Address) =>
     `${a.label || t("checkout.addressFallback")}: ${a.recipient_name || t("checkout.noName")}${
@@ -229,14 +386,64 @@ export default function CheckoutForm({
   const diskon = voucher ? Math.round((subtotal * voucher.persen) / 100) : 0;
   const total = subtotal + ongkir - diskon;
 
-  // ---------- Kirim pesanan ----------
-  function tampilkanErrorAlamat(pesan: string) {
-    setErrorAlamat(pesan);
+  // ---------- Navigasi langkah ----------
+  const gulungKeLangkah = () =>
     document
-      .getElementById("bagian-alamat")
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      .getElementById("checkout-langkah")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const bisaBuka = (no: Langkah) => {
+    if (no === 1) return true;
+    if (no === 2) return statusAlamat === "sudah";
+    return statusAlamat === "sudah" && statusPengiriman === "sudah";
+  };
+
+  function bukaLangkah(no: Langkah) {
+    setErrorLangkah("");
+    setLangkah(no);
+    gulungKeLangkah();
   }
 
+  function tampilkanErrorAlamat(pesan: string) {
+    setLangkah(1);
+    setErrorAlamat(pesan);
+    requestAnimationFrame(() =>
+      document
+        .getElementById("bagian-alamat")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+  }
+
+  function lanjut() {
+    setErrorLangkah("");
+
+    if (langkah === 1) {
+      if (!alamat) {
+        tampilkanErrorAlamat(t("checkout.needAddress"));
+        return;
+      }
+      if (!alamatLengkap(alamat)) {
+        tampilkanErrorAlamat(t("checkout.addressIncomplete"));
+        return;
+      }
+      bukaLangkah(2);
+      return;
+    }
+
+    if (langkah === 2) {
+      if (!pengiriman) {
+        setErrorLangkah(t("checkout.needShipping"));
+        return;
+      }
+      bukaLangkah(3);
+    }
+  }
+
+  function kembali() {
+    if (langkah > 1) bukaLangkah((langkah - 1) as Langkah);
+  }
+
+  // ---------- Kirim pesanan ----------
   async function kirimPesanan(e: React.FormEvent) {
     e.preventDefault();
     if (memproses) return;
@@ -251,7 +458,22 @@ export default function CheckoutForm({
       return;
     }
 
+    if (!pengiriman) {
+      setLangkah(2);
+      setErrorLangkah(t("checkout.needShipping"));
+      gulungKeLangkah();
+      return;
+    }
+
+    if (!pembayaran) {
+      setLangkah(3);
+      setErrorLangkah(t("checkout.needPayment"));
+      gulungKeLangkah();
+      return;
+    }
+
     setErrorAlamat("");
+    setErrorLangkah("");
     setPesanError("");
     setMemproses(true);
 
@@ -271,6 +493,12 @@ export default function CheckoutForm({
         setPesanError(result.error ?? t("checkout.orderFail"));
         setMemproses(false);
         return;
+      }
+
+      // Buka popup pembayaran Midtrans
+      const bayar = await bayarDenganSnap(result.orderId);
+      if (bayar.status === "error" && bayar.error) {
+        setPesanError(bayar.error);
       }
 
       router.push(`/checkout/sukses?id=${result.orderId}`);
@@ -328,6 +556,13 @@ export default function CheckoutForm({
         <h1 className="mt-5 text-3xl sm:text-4xl font-medium tracking-[-0.03em]">
           {t("checkout.title")}
         </h1>
+
+        <Stepper
+          langkah={langkah}
+          statuses={statuses}
+          bisaBuka={bisaBuka}
+          onPilih={bukaLangkah}
+        />
       </div>
 
       <form
@@ -336,158 +571,230 @@ export default function CheckoutForm({
         className="max-w-[1180px] mx-auto px-5 sm:px-8 mt-10 grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start"
       >
         {/* =====================================================
-            KOLOM KIRI
+            KOLOM KIRI: FORM PER LANGKAH
         ===================================================== */}
-        <div className="space-y-10">
+        <div
+          id="checkout-langkah"
+          className="scroll-mt-28 rounded-xl border border-[#EAE7E3] bg-white p-5 sm:p-6"
+        >
           {/* 1. ALAMAT */}
-          <section
-            id="bagian-alamat"
-            className="pt-8 border-t border-[#EAE7E3]"
-          >
-            <SectionTitle no={1} judul={t("checkout.address")} />
+          {langkah === 1 && (
+            <section id="bagian-alamat">
+              <StepHeader
+                no={1}
+                judul={t("checkout.address")}
+                status={statusAlamat}
+              />
 
-            {alamat ? (
-              <div className="space-y-4">
-                {/* Dropdown hanya muncul kalau punya lebih dari satu alamat */}
-                {addresses.length > 1 && (
-                  <div>
-                    <label
-                      htmlFor="pilih-alamat"
-                      className="block text-[11px] text-[#6F6A65] mb-2"
-                    >
-                      {t("checkout.sendTo")}
-                    </label>
+              {alamat ? (
+                <div className="space-y-4">
+                  {/* Dropdown hanya muncul kalau punya lebih dari satu alamat */}
+                  {addresses.length > 1 && (
+                    <div>
+                      <label
+                        htmlFor="pilih-alamat"
+                        className="block text-[11px] text-[#6F6A65] mb-2"
+                      >
+                        {t("checkout.sendTo")}
+                      </label>
 
-                    <select
-                      id="pilih-alamat"
-                      value={alamat.id}
-                      onChange={(e) => {
-                        setAlamatId(Number(e.target.value));
-                        setErrorAlamat("");
-                      }}
-                      className={`${inputClass()} h-11`}
-                    >
-                      {addresses.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {labelOpsi(a)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                      <select
+                        id="pilih-alamat"
+                        value={alamat.id}
+                        onChange={(e) => {
+                          setAlamatId(Number(e.target.value));
+                          setErrorAlamat("");
+                        }}
+                        className={`${inputClass()} h-11`}
+                      >
+                        {addresses.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {labelOpsi(a)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
-                {/* Detail alamat terpilih */}
-                <div className="rounded-lg border border-[#1A1A1A] bg-[#FAF8F5] p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {alamat.label && (
-                      <span className="text-xs font-medium">
-                        {alamat.label}
-                      </span>
+                  {/* Detail alamat terpilih */}
+                  <div className="rounded-lg border border-[#1A1A1A] bg-[#FAF8F5] p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {alamat.label && (
+                        <span className="text-xs font-medium">
+                          {alamat.label}
+                        </span>
+                      )}
+
+                      {alamat.is_default && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#1A1A1A] text-white text-[9px]">
+                          {t("checkout.default")}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="mt-2 text-[13px] font-medium">
+                      {alamat.recipient_name}
+                    </p>
+                    <p className="text-[11px] text-[#8A8178]">{alamat.phone}</p>
+
+                    <p className="mt-2 text-[13px] leading-6 text-[#4A463F]">
+                      {alamat.full_address}
+                    </p>
+                    <p className="text-[13px] text-[#4A463F]">
+                      {[alamat.city, alamat.province]
+                        .filter(Boolean)
+                        .join(", ")}{" "}
+                      {alamat.postal_code}
+                    </p>
+
+                    {alamat.notes && (
+                      <p className="mt-2 text-[11px] text-[#8A8178]">
+                        {t("checkout.notes", { notes: alamat.notes })}
+                      </p>
                     )}
-
-                    {alamat.is_default && (
-                      <span className="px-2 py-0.5 rounded-full bg-[#1A1A1A] text-white text-[9px]">
-                        {t("checkout.default")}
-                      </span>
-                    )}
                   </div>
 
-                  <p className="mt-2 text-[13px] font-medium">
-                    {alamat.recipient_name}
-                  </p>
-                  <p className="text-[11px] text-[#8A8178]">{alamat.phone}</p>
-
-                  <p className="mt-2 text-[13px] leading-6 text-[#4A463F]">
-                    {alamat.full_address}
-                  </p>
-                  <p className="text-[13px] text-[#4A463F]">
-                    {[alamat.city, alamat.province].filter(Boolean).join(", ")}{" "}
-                    {alamat.postal_code}
-                  </p>
-
-                  {alamat.notes && (
-                    <p className="mt-2 text-[11px] text-[#8A8178]">
-                      {t("checkout.notes", { notes: alamat.notes })}
+                  {statusAlamat === "perlu" && (
+                    <p className="text-[11px] text-[#B3261E]">
+                      {t("checkout.incomplete")}
                     </p>
                   )}
+
+                  <Link
+                    href="/profile#alamat"
+                    className="inline-block text-[11px] text-[#8A8178] underline underline-offset-4 hover:text-[#1A1A1A] transition"
+                  >
+                    {t("checkout.manageAddress")}
+                  </Link>
                 </div>
-
-                {alamatBelumLengkap && (
-                  <p className="text-[11px] text-[#B3261E]">
-                    {t("checkout.incomplete")}
+              ) : (
+                <div className="rounded-lg border border-dashed border-[#DDD8D2] px-6 py-8 text-center">
+                  <p className="text-[13px] font-medium">
+                    {t("checkout.noAddressTitle")}
                   </p>
-                )}
+                  <p className="mt-1 text-[11px] text-[#8A8178]">
+                    {t("checkout.noAddressBody")}
+                  </p>
 
-                <Link
-                  href="/profile#alamat"
-                  className="inline-block text-[11px] text-[#8A8178] underline underline-offset-4 hover:text-[#1A1A1A] transition"
-                >
-                  {t("checkout.manageAddress")}
-                </Link>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-[#DDD8D2] px-6 py-8 text-center">
-                <p className="text-[13px] font-medium">
-                  {t("checkout.noAddressTitle")}
+                  <Link
+                    href="/profile#alamat"
+                    className="inline-flex items-center justify-center mt-4 h-10 px-5 rounded-full bg-[#1A1A1A] text-white text-[11px] font-medium hover:bg-[#302D2A] transition"
+                  >
+                    {t("checkout.addAddress")}
+                  </Link>
+                </div>
+              )}
+
+              {errorAlamat && (
+                <p role="alert" className="mt-4 text-[11px] text-[#B3261E]">
+                  {errorAlamat}
                 </p>
-                <p className="mt-1 text-[11px] text-[#8A8178]">
-                  {t("checkout.noAddressBody")}
-                </p>
-
-                <Link
-                  href="/profile#alamat"
-                  className="inline-flex items-center justify-center mt-4 h-10 px-5 rounded-full bg-[#1A1A1A] text-white text-[11px] font-medium hover:bg-[#302D2A] transition"
-                >
-                  {t("checkout.addAddress")}
-                </Link>
-              </div>
-            )}
-
-            {errorAlamat && (
-              <p role="alert" className="mt-4 text-[11px] text-[#B3261E]">
-                {errorAlamat}
-              </p>
-            )}
-          </section>
+              )}
+            </section>
+          )}
 
           {/* 2. PENGIRIMAN */}
-          <section className="pt-8 border-t border-[#EAE7E3]">
-            <SectionTitle no={2} judul={t("checkout.shipping")} />
+          {langkah === 2 && (
+            <section>
+              <StepHeader
+                no={2}
+                judul={t("checkout.shipping")}
+                status={statusPengiriman}
+              />
 
-            <div className="space-y-3">
-              {opsiPengiriman.map((opsi) => (
-                <RadioCard
-                  key={opsi.id}
-                  name="pengiriman"
-                  value={opsi.id}
-                  checked={pengiriman === opsi.id}
-                  onChange={setPengiriman}
-                  title={opsi.nama}
-                  description={opsi.estimasi}
-                  trailing={rupiah(opsi.biaya)}
-                />
-              ))}
-            </div>
-          </section>
+              <div className="space-y-3">
+                {opsiPengiriman.map((opsi) => (
+                  <RadioCard
+                    key={opsi.id}
+                    name="pengiriman"
+                    value={opsi.id}
+                    checked={pengiriman === opsi.id}
+                    onChange={(value) => {
+                      setPengiriman(value);
+                      setErrorLangkah("");
+                    }}
+                    title={opsi.nama}
+                    description={opsi.estimasi}
+                    trailing={rupiah(opsi.biaya)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* 3. PEMBAYARAN */}
-          <section className="pt-8 border-t border-[#EAE7E3]">
-            <SectionTitle no={3} judul={t("checkout.payment")} />
+          {langkah === 3 && (
+            <section>
+              <StepHeader
+                no={3}
+                judul={t("checkout.payment")}
+                status={statusPembayaran}
+              />
 
-            <div className="space-y-3">
-              {opsiPembayaran.map((opsi) => (
-                <RadioCard
-                  key={opsi.id}
-                  name="pembayaran"
-                  value={opsi.id}
-                  checked={pembayaran === opsi.id}
-                  onChange={setPembayaran}
-                  title={opsi.nama}
-                  description={opsi.deskripsi}
-                />
-              ))}
-            </div>
-          </section>
+              <div className="space-y-3">
+                {opsiPembayaran.map((opsi) => (
+                  <RadioCard
+                    key={opsi.id}
+                    name="pembayaran"
+                    value={opsi.id}
+                    checked={pembayaran === opsi.id}
+                    onChange={(value) => {
+                      setPembayaran(value);
+                      setErrorLangkah("");
+                    }}
+                    title={opsi.nama}
+                    description={opsi.deskripsi}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {errorLangkah && langkah !== 1 && (
+            <p role="alert" className="mt-5 text-[11px] text-[#B3261E]">
+              {errorLangkah}
+            </p>
+          )}
+
+          {/* NAVIGASI LANGKAH */}
+          <div className="mt-8 flex items-center justify-between gap-3 border-t border-[#EAE7E3] pt-5">
+            {langkah > 1 ? (
+              <button
+                type="button"
+                onClick={kembali}
+                className="h-10 px-5 rounded-full border border-[#DDD8D2] text-[11px] font-medium hover:border-[#1A1A1A] transition cursor-pointer"
+              >
+                {t("checkout.back")}
+              </button>
+            ) : (
+              <span className="text-[11px] text-[#8A8178]">
+                {t("checkout.stepOf", { current: langkah, total: 3 })}
+              </span>
+            )}
+
+            {langkah < 3 ? (
+              <button
+                type="button"
+                onClick={lanjut}
+                className="inline-flex h-10 items-center gap-2 rounded-full bg-[#1A1A1A] px-6 text-[11px] font-medium text-white hover:bg-[#302D2A] transition cursor-pointer"
+              >
+                {t("checkout.next")}
+                <svg viewBox="0 0 20 20" fill="none" className="w-3.5 h-3.5">
+                  <path
+                    d="M4 10H16M11 5L16 10L11 15"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            ) : (
+              <span className="text-[11px] text-[#8A8178]">
+                {t("checkout.finalStep")}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* =====================================================
@@ -530,7 +837,8 @@ export default function CheckoutForm({
                   <p className="text-xs font-medium leading-5">{item.nama}</p>
                   <p className="mt-0.5 text-[11px] text-[#8A8178]">
                     {[
-                      item.ukuran && t("product.sizeWith", { size: item.ukuran }),
+                      item.ukuran &&
+                        t("product.sizeWith", { size: item.ukuran }),
                       item.warna,
                     ]
                       .filter(Boolean)
@@ -629,27 +937,37 @@ export default function CheckoutForm({
             <span className="text-lg font-medium">{rupiah(total)}</span>
           </div>
 
-          <button
-            type="submit"
-            disabled={memproses}
-            className="
-              mt-6 w-full h-12 rounded-full bg-[#1A1A1A] text-white text-xs font-medium
-              hover:bg-[#302D2A] transition
-              disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
-            "
-          >
-            {memproses ? t("checkout.processingOrder") : t("checkout.placeOrder")}
-          </button>
+          {langkah === 3 ? (
+            <>
+              <button
+                type="submit"
+                disabled={memproses}
+                className="
+                  mt-6 w-full h-12 rounded-full bg-[#1A1A1A] text-white text-xs font-medium
+                  hover:bg-[#302D2A] transition
+                  disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
+                "
+              >
+                {memproses
+                  ? t("checkout.processingOrder")
+                  : t("checkout.placeOrder")}
+              </button>
 
-          {pesanError && (
-            <p role="alert" className="mt-3 text-[11px] text-[#B3261E]">
-              {pesanError}
+              {pesanError && (
+                <p role="alert" className="mt-3 text-[11px] text-[#B3261E]">
+                  {pesanError}
+                </p>
+              )}
+
+              <p className="mt-4 text-[10px] leading-5 text-center text-[#8A8178]">
+                {t("checkout.termsNote")}
+              </p>
+            </>
+          ) : (
+            <p className="mt-6 rounded-lg border border-[#EAE7E3] bg-white px-4 py-3 text-[11px] leading-5 text-[#6F6A65]">
+              {t("checkout.finishHint")}
             </p>
           )}
-
-          <p className="mt-4 text-[10px] leading-5 text-center text-[#8A8178]">
-            {t("checkout.termsNote")}
-          </p>
         </aside>
       </form>
     </main>

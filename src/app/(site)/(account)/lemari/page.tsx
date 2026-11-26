@@ -110,7 +110,11 @@ export default async function LemariPage() {
         </div>
 
         {/* ===================== KONTEN ===================== */}
-        {items.length === 0 ? (
+        <div
+          className="overflow-y-auto pr-1 inner-scroll"
+          style={{ height: "min(680px, calc(100dvh - 220px))" }}
+        >
+          {items.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-[24px] border border-black/5">
             <div className="w-16 h-16 rounded-full bg-[#EBEBEB] flex items-center justify-center mx-auto mb-5 text-[#8B6B5A]">
               <svg
@@ -198,7 +202,8 @@ export default async function LemariPage() {
               ))}
             </div>
           </>
-        )}
+          )}
+        </div>
     </div>
   );
 }

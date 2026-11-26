@@ -4,6 +4,7 @@ import { formatTanggal, rupiah } from "@/lib/orders";
 import ConfirmButton from "@/components/admin/ConfirmButton";
 import { deleteProduct } from "@/lib/actions/admin";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import SortSelect from "@/components/admin/SortSelect";
 
 const styleSvg = {
   width: 18,
@@ -74,12 +75,56 @@ function totalStok(varian: ProdukRow["product_variants"]) {
 
 const PER_HALAMAN = 10;
 
+const SORT_PRODUK = [
+  { value: "terbaru", label: "Terbaru" },
+  { value: "terlama", label: "Terlama" },
+  { value: "nama-az", label: "Nama A–Z" },
+  { value: "nama-za", label: "Nama Z–A" },
+  { value: "kategori-az", label: "Kategori A–Z" },
+  { value: "kategori-za", label: "Kategori Z–A" },
+  { value: "harga-rendah", label: "Harga terendah" },
+  { value: "harga-tinggi", label: "Harga tertinggi" },
+  { value: "stok-rendah", label: "Stok terendah" },
+  { value: "stok-tinggi", label: "Stok tertinggi" },
+];
+
+type SortProduk = (typeof SORT_PRODUK)[number]["value"];
+
+const FILTER_KATEGORI = [
+  { value: "", label: "Semua Kategori" },
+  { value: "kaos", label: "Kaos" },
+  { value: "celana", label: "Celana" },
+  { value: "kemeja", label: "Kemeja" },
+  { value: "sweater", label: "Sweater" },
+  { value: "jaket", label: "Jaket" },
+  { value: "rok", label: "Rok" },
+];
+
+function cocokKategori(namaKategoriProduk: string, filter: string) {
+  if (!filter) return true;
+
+  const nama = namaKategoriProduk.toLowerCase();
+  // "Kaos" kadang tersimpan sebagai "Kaus" di database.
+  if (filter === "kaos") return nama.includes("kaos") || nama.includes("kaus");
+  return nama.includes(filter);
+}
+
 export default async function AdminProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    page?: string;
+    sort?: string;
+    kategori?: string;
+  }>;
 }) {
-  const { q, page: pageParam } = await searchParams;
+  const {
+    q,
+    page: pageParam,
+    sort: sortParam,
+    kategori: kategoriParam,
+  } = await searchParams;
   const supabase = await createClient();
 
   const [kunci, { count: jumlahKategori }, { count: jumlahVarianMenipis }] =
@@ -105,23 +150,78 @@ export default async function AdminProductsPage({
 
   const semuaProduk = (kunci.data ?? []) as unknown as ProdukRow[];
 
+  // ---------- Filter kategori ----------
+  const kategoriAktif = FILTER_KATEGORI.some(
+    (k) => k.value === kategoriParam && k.value !== "",
+  )
+    ? (kategoriParam as string)
+    : "";
+
+  const produkKategori = kategoriAktif
+    ? semuaProduk.filter((p) =>
+        cocokKategori(namaKategori(p.categories), kategoriAktif),
+      )
+    : semuaProduk;
+
   // Pencarian nama (case-insensitive) via query string ?q=
   const kata = q?.trim().toLowerCase() ?? "";
   const produkTerfilter =
     kata.length > 0
-      ? semuaProduk.filter((p) => p.name.toLowerCase().includes(kata))
-      : semuaProduk;
+      ? produkKategori.filter((p) => p.name.toLowerCase().includes(kata))
+      : produkKategori;
+
+  // ---------- Urutan ----------
+  const sort: SortProduk = SORT_PRODUK.some((s) => s.value === sortParam)
+    ? (sortParam as SortProduk)
+    : "terbaru";
+
+  const produkTerurut = [...produkTerfilter].sort((a, b) => {
+    switch (sort) {
+      case "terlama":
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      case "nama-az":
+        return a.name.localeCompare(b.name, "id");
+      case "nama-za":
+        return b.name.localeCompare(a.name, "id");
+      case "kategori-az":
+        return namaKategori(a.categories).localeCompare(
+          namaKategori(b.categories),
+          "id",
+        );
+      case "kategori-za":
+        return namaKategori(b.categories).localeCompare(
+          namaKategori(a.categories),
+          "id",
+        );
+      case "harga-rendah":
+        return Number(a.base_price) - Number(b.base_price);
+      case "harga-tinggi":
+        return Number(b.base_price) - Number(a.base_price);
+      case "stok-rendah":
+        return totalStok(a.product_variants) - totalStok(b.product_variants);
+      case "stok-tinggi":
+        return totalStok(b.product_variants) - totalStok(a.product_variants);
+      default:
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    }
+  });
 
   // ---------- Pagination ----------
   const halamanSekarang = Math.max(1, parseInt(pageParam ?? "1", 10));
-  const totalHalaman = Math.ceil(produkTerfilter.length / PER_HALAMAN);
+  const totalHalaman = Math.ceil(produkTerurut.length / PER_HALAMAN);
   const halamanValid = Math.min(halamanSekarang, Math.max(1, totalHalaman));
   const mulai = (halamanValid - 1) * PER_HALAMAN;
-  const produk = produkTerfilter.slice(mulai, mulai + PER_HALAMAN);
+  const produk = produkTerurut.slice(mulai, mulai + PER_HALAMAN);
 
   function hrefHalaman(h: number) {
     const params = new URLSearchParams();
     if (kata) params.set("q", q!);
+    if (sort !== "terbaru") params.set("sort", sort);
+    if (kategoriAktif) params.set("kategori", kategoriAktif);
     if (h > 1) params.set("page", String(h));
     const qs = params.toString();
     return `/admin/products${qs ? `?${qs}` : ""}`;
@@ -195,6 +295,12 @@ export default async function AdminProductsPage({
       {/* ===== Pencarian ===== */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
         <form action="/admin/products" method="GET" className="flex-1 max-w-md">
+          {sort !== "terbaru" && (
+            <input type="hidden" name="sort" value={sort} />
+          )}
+          {kategoriAktif && (
+            <input type="hidden" name="kategori" value={kategoriAktif} />
+          )}
           <div className="relative">
             <span
               aria-hidden
@@ -225,9 +331,30 @@ export default async function AdminProductsPage({
           </div>
         </form>
 
-        <p className="text-[12px] text-[#8A837B]">
-          Menampilkan {produkTerfilter.length} dari {semuaProduk.length} produk
-          {kata.length > 0 && (
+        <SortSelect
+          value={kategoriAktif}
+          options={FILTER_KATEGORI}
+          paramName="kategori"
+          baseParams={{
+            q,
+            sort: sort !== "terbaru" ? sort : undefined,
+          }}
+          ariaLabel="Filter kategori produk"
+        />
+
+        <SortSelect
+          value={sort}
+          options={SORT_PRODUK}
+          baseParams={{
+            q,
+            kategori: kategoriAktif || undefined,
+          }}
+          ariaLabel="Urutkan produk"
+        />
+
+        <p className="text-[12px] text-[#8A837B] sm:ml-auto">
+          Menampilkan {produkTerurut.length} dari {semuaProduk.length} produk
+          {(kata.length > 0 || kategoriAktif) && (
             <Link
               href="/admin/products"
               className="ml-1.5 text-[#8B6B5A] hover:text-[#1E1C18] underline underline-offset-4 transition"
@@ -329,12 +456,16 @@ export default async function AdminProductsPage({
                   <p className="mt-3 text-sm font-medium text-[#1E1C18]">
                     {semuaProduk.length === 0
                       ? "Belum ada produk."
-                      : `Tidak ada produk yang cocok dengan "${kata}".`}
+                      : kata.length > 0
+                        ? `Tidak ada produk yang cocok dengan "${kata}".`
+                        : "Tidak ada produk pada kategori ini."}
                   </p>
                   <p className="mt-1 text-sm text-[#8A837B]">
                     {semuaProduk.length === 0
                       ? "Tambahkan produk pertama untuk mulai berjualan."
-                      : "Coba kata kunci lain atau reset pencarian."}
+                      : kata.length > 0
+                        ? "Coba kata kunci lain atau reset pencarian."
+                        : "Coba kategori lain atau lihat semua produk."}
                   </p>
                   {semuaProduk.length === 0 ? (
                     <Link
@@ -362,7 +493,7 @@ export default async function AdminProductsPage({
       {totalHalaman > 1 && (
         <div className="mt-4 flex items-center justify-between gap-4 text-[13px]">
           <p className="text-[#8A837B]">
-            Menampilkan {mulai + 1}–{Math.min(mulai + PER_HALAMAN, produkTerfilter.length)} dari {produkTerfilter.length} produk
+            Menampilkan {mulai + 1}–{Math.min(mulai + PER_HALAMAN, produkTerurut.length)} dari {produkTerurut.length} produk
           </p>
           <div className="flex items-center gap-1">
             <Link

@@ -1,10 +1,15 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import StatusBadge from "@/components/orders/StatusBadge";
 import ReviewForm from "@/components/review/ReviewForm";
 import CancelOrderForm from "@/components/orders/CancelOrderForm";
+import PayButton from "@/components/orders/PayButton";
 import RefundRequestButton from "@/components/orders/RefundRequestButton";
+import OrderDetailTabs, {
+  type OrderDetailTab,
+} from "@/components/orders/OrderDetailTabs";
 import ChatWidget from "@/components/chat/ChatWidget";
 import {
   STATUS_DESC_TKEY,
@@ -25,10 +30,7 @@ import {
   type ItemRow,
 } from "@/lib/orders";
 import { getT, dateLocale } from "@/lib/i18n/server";
-import {
-  KOLOM_MESSAGE,
-  type ChatMessage,
-} from "@/lib/chat";
+import { KOLOM_MESSAGE, type ChatMessage } from "@/lib/chat";
 
 type PesananDetail = {
   id: number;
@@ -61,7 +63,24 @@ type AlamatRow = {
   notes: string | null;
 };
 
-const kartu = "bg-white rounded-[24px] border border-black/5 shadow-sm p-6";
+const kartu = "rounded-[24px] border border-black/5 bg-white shadow-sm";
+
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 text-[13px]">
+      <dt className="shrink-0 text-[#8B8478]">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-medium text-[#1E1C18]">
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 export default async function DetailPesananPage({
   params,
@@ -76,6 +95,7 @@ export default async function DetailPesananPage({
   }
 
   const { t, locale } = await getT();
+  const lokale = dateLocale(locale);
   const supabase = await createClient();
 
   const {
@@ -133,8 +153,8 @@ export default async function DetailPesananPage({
     console.error("Gagal mengambil detail pesanan:", error.message);
 
     return (
-      <div className="max-w-[520px] text-center">
-        <div className={kartu}>
+      <div className="mx-auto max-w-[520px] text-center">
+        <div className={`${kartu} p-8`}>
           <p className="text-sm font-medium">{t("account.loadFail")}</p>
           <p className="mt-1 text-sm text-[#8B8478]">
             {t("account.loadFailBody")}
@@ -175,7 +195,7 @@ export default async function DetailPesananPage({
   const bayar = infoPembayaran(pesanan.payment_status, info.key, t);
   const items = (pesanan.order_items ?? []).map((i) => infoItem(i, t));
 
-  const subtotal = items.reduce((t, i) => t + i.harga * i.jumlah, 0);
+  const subtotal = items.reduce((n, i) => n + i.harga * i.jumlah, 0);
   const ongkir = angka(pesanan.shipping_cost);
   const diskon = angka(pesanan.discount);
   const total = angka(pesanan.total);
@@ -212,6 +232,7 @@ export default async function DetailPesananPage({
 
     refund = (refundData as RefundRow | null) ?? null;
   }
+  const refundInfo = refund ? infoRefund(refund.status) : null;
 
   // ---------- Data ulasan (hanya saat pesanan selesai) ----------
   // Cari product id tiap item, lalu cek ulasan user untuk produk itu.
@@ -265,479 +286,506 @@ export default async function DetailPesananPage({
     chatMessages = (msgsChat as ChatMessage[] | null) ?? [];
   }
 
-  return (
-    <div>
-        {/* ===================== HEADER PESANAN ===================== */}
-        <section className={`${kartu} mb-6`}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-xl md:text-2xl font-semibold tracking-[-0.02em]">
-                {kodePesanan(pesanan.id)}
-              </h1>
-              <p className="mt-1 text-xs text-[#8B8478]">
-                {t("account.orderedOn", {
-                  date: formatTanggalWaktu(pesanan.created_at, dateLocale(locale)),
-                })}
-              </p>
+  // ---------- Tab ringkas untuk rincian pesanan ----------
+  const tabs: OrderDetailTab[] = [
+    {
+      key: "payment",
+      label: t("account.tabPayment"),
+      content: (
+        <div className="space-y-4">
+          <dl className="divide-y divide-[#EFEDE8]">
+            <DetailRow label={t("account.productSubtotal")}>
+              {rupiah(subtotal)}
+            </DetailRow>
+            <DetailRow label={t("account.shippingCost")}>
+              {rupiah(ongkir)}
+            </DetailRow>
+            {diskon > 0 && (
+              <DetailRow
+                label={`${t("account.discount")}${
+                  pesanan.voucher_code ? ` (${pesanan.voucher_code})` : ""
+                }`}
+              >
+                <span className="text-[#1E6B3A]">-{rupiah(diskon)}</span>
+              </DetailRow>
+            )}
+            <div className="flex items-center justify-between gap-4 pt-3">
+              <span className="text-[13px] font-semibold">
+                {t("account.total")}
+              </span>
+              <span className="text-base font-semibold">
+                {rupiah(total)}
+              </span>
             </div>
+          </dl>
 
-            <StatusBadge label={info.label} tone={info.tone} />
+          <dl className="divide-y divide-[#EFEDE8] rounded-xl bg-[#FAF8F5] px-3">
+            <DetailRow label={t("account.method")}>
+              {labelMetodeBayar(pesanan.payment_method)}
+            </DetailRow>
+            <DetailRow label={t("account.status")}>
+              <StatusBadge label={bayar.label} tone={bayar.tone} />
+            </DetailRow>
+            {pesanan.paid_at && (
+              <DetailRow label={t("account.paidOnLabel")}>
+                {formatTanggalWaktu(pesanan.paid_at, lokale)}
+              </DetailRow>
+            )}
+          </dl>
+        </div>
+      ),
+    },
+    {
+      key: "shipping",
+      label: t("account.tabShipping"),
+      content: (
+        <div className="space-y-3">
+          <dl className="divide-y divide-[#EFEDE8]">
+            <DetailRow label={t("account.method")}>
+              {labelPengiriman(pesanan.shipping_method, t)}
+            </DetailRow>
+            <DetailRow label={t("account.trackingNumber")}>
+              {pesanan.tracking_number || (
+                <span className="text-[#8B8478]">
+                  {t("account.notAvailable")}
+                </span>
+              )}
+            </DetailRow>
+          </dl>
+
+          <div className="rounded-xl bg-[#FAF8F5] p-3">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[#9A7B69]">
+              {t("account.shippedTo")}
+            </p>
+            {alamat ? (
+              <address className="mt-2 not-italic text-[12px] leading-5 text-[#4A463F]">
+                <p className="font-semibold text-[#1E1C18]">
+                  {alamat.recipient_name}
+                </p>
+                <p className="text-[11px] text-[#8B8478]">
+                  {[alamat.label, alamat.phone].filter(Boolean).join(" · ")}
+                </p>
+                <p className="mt-1.5">{alamat.full_address}</p>
+                <p>
+                  {[alamat.city, alamat.province].filter(Boolean).join(", ")}{" "}
+                  {alamat.postal_code}
+                </p>
+                {alamat.notes && (
+                  <p className="mt-1.5 text-[11px] text-[#8B8478]">
+                    {t("account.notes", { notes: alamat.notes })}
+                  </p>
+                )}
+              </address>
+            ) : (
+              <p className="mt-2 text-[12px] text-[#8B8478]">
+                {t("account.addressNotAvailable")}
+              </p>
+            )}
           </div>
+        </div>
+      ),
+    },
+  ];
 
-          {/* PROGRES */}
-          {dibatalkan ? (
-            <div className="mt-6 rounded-2xl bg-[#FCE8E6] px-5 py-4 text-sm text-[#B3261E]">
-              <p className="font-medium">{t(STATUS_DESC_TKEY.dibatalkan)}</p>
-              <p className="mt-1 text-[13px] text-[#8A2530]">
-                {t("account.cancelledOn", {
-                  date: formatTanggalWaktu(
-                    pesanan.cancelled_at ?? pesanan.created_at,
-                    dateLocale(locale),
-                  ),
-                })}
-              </p>
-            </div>
-          ) : indeksTahap >= 0 ? (
-            <ol className="mt-8 flex items-start" aria-label={t("account.orderProgress")}>
-              {TAHAP.map((key, i) => {
-                const tercapai = i <= indeksTahap;
-                const sekarang = i === indeksTahap;
+  if (dibatalkan && sudahBayar) {
+    tabs.push({
+      key: "refund",
+      label: t("account.tabRefund"),
+      content: refund ? (
+        <div className="space-y-3">
+          <dl className="divide-y divide-[#EFEDE8]">
+            <DetailRow label={t("account.refundStatusLabel")}>
+              <StatusBadge
+                label={refundInfo?.label ?? "-"}
+                tone={refundInfo?.tone ?? "abu"}
+              />
+            </DetailRow>
+            <DetailRow label={t("account.refundAmount")}>
+              {rupiah(angka(refund.refund_amount ?? pesanan.total))}
+            </DetailRow>
+            {refund.reason && (
+              <DetailRow label={t("account.refundReasonLabel")}>
+                {refund.reason}
+              </DetailRow>
+            )}
+          </dl>
 
-                return (
-                  <li
-                    key={key}
-                    aria-current={sekarang ? "step" : undefined}
-                    className="relative flex-1 flex flex-col items-center text-center"
-                  >
-                    {i > 0 && (
-                      <span
-                        aria-hidden="true"
-                        className={`absolute top-3 right-1/2 w-full h-px ${
-                          tercapai ? "bg-[#1E1C18]" : "bg-[#E7E5E0]"
-                        }`}
-                      />
-                    )}
-
-                    <span
-                      className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${
-                        tercapai
-                          ? "bg-[#1E1C18] text-white"
-                          : "bg-white border border-[#E7E5E0] text-[#B5AEA2]"
-                      }`}
-                    >
-                      {tercapai ? (
-                        <svg
-                          viewBox="0 0 20 20"
-                          fill="none"
-                          aria-hidden="true"
-                          className="w-3 h-3"
-                        >
-                          <path
-                            d="M4.5 10.5L8.5 14.5L15.5 6"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      ) : (
-                        i + 1
-                      )}
-                    </span>
-
-                    <span
-                      className={`mt-2 px-1 text-[10px] sm:text-[11px] leading-4 ${
-                        sekarang
-                          ? "font-semibold text-[#1E1C18]"
-                          : "text-[#8B8478]"
-                      }`}
-                    >
-                      {t(STATUS_TKEY[key])}
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-          ) : null}
-
-          {info.deskripsi && !dibatalkan && (
-            <p className="mt-6 text-sm text-[#6B655A]">{info.deskripsi}</p>
-          )}
-
-          {perluBayar && pesanan.payment_deadline && (
-            <p className="mt-3 rounded-2xl bg-[#FFF4DB] px-5 py-3 text-sm text-[#8A5A00]">
-              {t("account.payBefore", {
-                date: formatTanggalWaktu(
-                  pesanan.payment_deadline,
-                  dateLocale(locale),
-                ),
+          {refund.requested_at && (
+            <p className="text-[11px] text-[#8B8478]">
+              {t("account.refundRequestedOn", {
+                date: formatTanggal(refund.requested_at, lokale),
               })}
             </p>
           )}
 
-          {/* Alasan pembatalan (wajib diisi user saat membatalkan) */}
-          {dibatalkan && pesanan.cancellation_reason && (
-            <div className="mt-6 rounded-2xl border border-[#EFEDE8] bg-white px-5 py-4">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-[#9A7B69] font-semibold">
-                {t("account.cancelReasonLabel")}
-              </p>
-              <p className="mt-2 text-sm text-[#4A463F]">
-                {pesanan.cancellation_reason}
-              </p>
-            </div>
+          {refundInfo?.key === "menunggu" && (
+            <p className="rounded-xl bg-[#FFF4DB] px-3 py-2 text-[11px] text-[#8A5A00]">
+              {t("account.refundPendingDesc")}
+            </p>
+          )}
+          {refundInfo?.key === "disetujui" && (
+            <p className="rounded-xl bg-[#E6F4EA] px-3 py-2 text-[11px] text-[#1E6B3A]">
+              {t("account.refundApprovedDesc")}
+            </p>
+          )}
+          {refundInfo?.key === "ditolak" && (
+            <p className="rounded-xl bg-[#FCE8E6] px-3 py-2 text-[11px] text-[#B3261E]">
+              {t("account.refundRejectedDesc")}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl bg-[#FAF8F5] p-3">
+          <p className="text-[12px] leading-5 text-[#6B655A]">
+            {t("account.requestRefundHint")}
+          </p>
+          <div className="mt-3 flex justify-end">
+            <RefundRequestButton orderId={pesanan.id} />
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  return (
+    <div>
+      {/* ===================== HEADER PESANAN ===================== */}
+      <section className={`${kartu} mb-6 p-6`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-semibold tracking-[-0.02em]">
+              {kodePesanan(pesanan.id)}
+            </h1>
+            <p className="mt-1 text-xs text-[#8B8478]">
+              {t("account.orderedOn", {
+                date: formatTanggalWaktu(
+                  pesanan.created_at,
+                  dateLocale(locale),
+                ),
+              })}
+            </p>
+          </div>
+
+          <StatusBadge label={info.label} tone={info.tone} />
+        </div>
+
+        {/* PROGRES */}
+        {dibatalkan ? (
+          <div className="mt-6 rounded-2xl bg-[#FCE8E6] px-5 py-4 text-sm text-[#B3261E]">
+            <p className="font-medium">{t(STATUS_DESC_TKEY.dibatalkan)}</p>
+            <p className="mt-1 text-[13px] text-[#8A2530]">
+              {t("account.cancelledOn", {
+                date: formatTanggalWaktu(
+                  pesanan.cancelled_at ?? pesanan.created_at,
+                  dateLocale(locale),
+                ),
+              })}
+            </p>
+          </div>
+        ) : indeksTahap >= 0 ? (
+          <ol
+            className="mt-8 flex items-start"
+            aria-label={t("account.orderProgress")}
+          >
+            {TAHAP.map((key, i) => {
+              const tercapai = i <= indeksTahap;
+              const sekarang = i === indeksTahap;
+
+              return (
+                <li
+                  key={key}
+                  aria-current={sekarang ? "step" : undefined}
+                  className="relative flex-1 flex flex-col items-center text-center"
+                >
+                  {i > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className={`absolute top-3 right-1/2 w-full h-px ${
+                        tercapai ? "bg-[#1E1C18]" : "bg-[#E7E5E0]"
+                      }`}
+                    />
+                  )}
+
+                  <span
+                    className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${
+                      tercapai
+                        ? "bg-[#1E1C18] text-white"
+                        : "bg-white border border-[#E7E5E0] text-[#B5AEA2]"
+                    }`}
+                  >
+                    {tercapai ? (
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        aria-hidden="true"
+                        className="w-3 h-3"
+                      >
+                        <path
+                          d="M4.5 10.5L8.5 14.5L15.5 6"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : (
+                      i + 1
+                    )}
+                  </span>
+
+                  <span
+                    className={`mt-2 px-1 text-[10px] sm:text-[11px] leading-4 ${
+                      sekarang
+                        ? "font-semibold text-[#1E1C18]"
+                        : "text-[#8B8478]"
+                    }`}
+                  >
+                    {t(STATUS_TKEY[key])}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
+
+        {info.deskripsi && !dibatalkan && (
+          <p className="mt-6 text-sm text-[#6B655A]">{info.deskripsi}</p>
+        )}
+
+        {perluBayar && pesanan.payment_deadline && (
+          <p className="mt-3 rounded-2xl bg-[#FFF4DB] px-5 py-3 text-sm text-[#8A5A00]">
+            {t("account.payBefore", {
+              date: formatTanggalWaktu(
+                pesanan.payment_deadline,
+                dateLocale(locale),
+              ),
+            })}
+          </p>
+        )}
+        {perluBayar && (
+          <div className="mt-4">
+            <PayButton orderId={pesanan.id} />
+          </div>
+        )}
+
+        {/* Nota tersedia setelah pembayaran dikonfirmasi */}
+        {sudahBayar && (
+          <div className="mt-4">
+            <Link
+              href={`/pesanan/${pesanan.id}/nota`}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-full border border-[#DDD8D2] bg-white px-6 text-xs font-medium text-[#4A463F] transition hover:border-[#1A1A1A] hover:text-[#1A1A1A]"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+                className="h-4 w-4"
+              >
+                <path
+                  d="M7 9V4h10v5M7 18H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2M7 15h10v6H7v-6Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("nota.viewNotes")}
+            </Link>
+          </div>
+        )}
+
+        {/* Alasan pembatalan (wajib diisi user saat membatalkan) */}
+        {dibatalkan && pesanan.cancellation_reason && (
+          <div className="mt-6 rounded-2xl border border-[#EFEDE8] bg-white px-5 py-4">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-[#9A7B69] font-semibold">
+              {t("account.cancelReasonLabel")}
+            </p>
+            <p className="mt-2 text-sm text-[#4A463F]">
+              {pesanan.cancellation_reason}
+            </p>
+          </div>
+        )}
+
+        {/* Tombol batalkan pesanan — hanya sebelum pesanan dikirim */}
+        {bisaDibatalkan && (
+          <div className="mt-6">
+            <CancelOrderForm orderId={pesanan.id} />
+          </div>
+        )}
+      </section>
+
+      {/* ===================== KONTEN UTAMA ===================== */}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        {/* PRODUK */}
+        <section className={`${kartu} min-w-0 p-5 md:p-6`}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">
+              {t("account.orderedProducts")}
+            </h2>
+            <span className="rounded-full bg-[#F3F1EC] px-2.5 py-1 text-[11px] text-[#6B655A]">
+              {t("account.productCount", { count: items.length })}
+            </span>
+          </div>
+
+          {selesai && items.length > 0 && (
+            <p className="mt-1 text-[11px] text-[#8B8478]">
+              {t("account.orderCompleteReviewHint")}
+            </p>
           )}
 
-          {/* Tombol batalkan pesanan — hanya sebelum pesanan dikirim */}
-          {bisaDibatalkan && (
-            <div className="mt-6">
-              <CancelOrderForm orderId={pesanan.id} />
-            </div>
-          )}
-        </section>
+          {items.length === 0 ? (
+            <p className="mt-4 rounded-xl bg-[#FAF8F5] px-4 py-6 text-center text-[13px] text-[#8B8478]">
+              {t("account.noItemDetail")}
+            </p>
+          ) : (
+            <ul className="mt-4 max-h-[30rem] space-y-2.5 overflow-y-auto pr-1 inner-scroll">
+              {items.map((item) => {
+                const produkId = produkIdPerItem.get(item.id);
+                const ulasan =
+                  produkId != null ? ulasanPerProduk.get(produkId) : null;
 
-        <div className="grid xl:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
-          {/* ===================== PRODUK ===================== */}
-          <section className={kartu}>
-            <h2 className="text-base font-semibold mb-5">{t("account.orderedProducts")}</h2>
+                return (
+                  <li
+                    key={item.id}
+                    className="rounded-2xl border border-[#EFEDE8] p-3 md:p-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-16 w-14 shrink-0 overflow-hidden rounded-xl bg-[#F3F1EC]">
+                        {item.gambar && (
+                          <img
+                            src={item.gambar}
+                            alt={item.nama}
+                            className="h-full w-full object-cover"
+                          />
+                        )}
+                      </div>
 
-            {selesai && items.length > 0 && (
-              <p className="-mt-3 mb-5 text-sm text-[#6B655A]">
-                {t("account.orderCompleteReviewHint")}
-              </p>
-            )}
-
-            {items.length === 0 ? (
-              <p className="text-sm text-[#8B8478]">
-                {t("account.noItemDetail")}
-              </p>
-            ) : (
-              <ul className="divide-y divide-[#EFEDE8]">
-                {items.map((item) => {
-                  const produkId = produkIdPerItem.get(item.id);
-                  const ulasan =
-                    produkId != null
-                      ? ulasanPerProduk.get(produkId)
-                      : null;
-
-                  return (
-                    <li
-                      key={item.id}
-                      className="py-4 first:pt-0 last:pb-0"
-                    >
-                      <div className="flex gap-4">
-                        <div className="w-16 aspect-[4/5] shrink-0 overflow-hidden rounded-lg bg-[#F3F1EC]">
-                          {item.gambar && (
-                            <img
-                              src={item.gambar}
-                              alt={item.nama}
-                              className="w-full h-full object-cover"
-                            />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium leading-5">
-                            {item.nama}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium">
+                          {item.nama}
+                        </p>
+                        {item.detail && (
+                          <p className="mt-0.5 truncate text-[11px] text-[#8B8478]">
+                            {item.detail}
                           </p>
-                          {item.detail && (
-                            <p className="mt-0.5 text-xs text-[#8B8478]">
-                              {item.detail}
-                            </p>
-                          )}
-                          <p className="mt-0.5 text-xs text-[#8B8478]">
-                            {item.jumlah} x {rupiah(item.harga)}
-                          </p>
-                        </div>
-
-                        <p className="text-sm font-medium">
-                          {rupiah(item.harga * item.jumlah)}
+                        )}
+                        <p className="mt-1 text-[11px] text-[#8B8478]">
+                          {item.jumlah} × {rupiah(item.harga)}
                         </p>
                       </div>
 
-                      {/* ULASAN — hanya saat pesanan sudah selesai */}
-                      {selesai && produkId != null && (
-                        <div className="mt-4 pt-4 border-t border-[#EFEDE8]">
-                          {ulasan ? (
-                            <div>
-                              <div className="flex items-center gap-3">
-                                <div className="flex text-sm">
-                                  {[1, 2, 3, 4, 5].map((bintang) => (
-                                    <span
-                                      key={bintang}
-                                      className={
-                                        bintang <= ulasan.rating
-                                          ? "text-[#B18452]"
-                                          : "text-[#D8D1CA]"
-                                      }
-                                    >
-                                      ★
-                                    </span>
-                                  ))}
-                                </div>
-                                <span className="text-xs text-[#8B8478]">
+                      <p className="shrink-0 text-[13px] font-semibold">
+                        {rupiah(item.harga * item.jumlah)}
+                      </p>
+                    </div>
+
+                    {/* ULASAN — hanya saat pesanan selesai, dan bisa dibuka sesuai kebutuhan */}
+                    {selesai && produkId != null && (
+                      <div className="mt-3 border-t border-[#EFEDE8] pt-3">
+                        {ulasan ? (
+                          <div>
+                            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  aria-label={`${ulasan.rating}/5`}
+                                  className="text-[13px] tracking-[0.12em] text-[#B18452]"
+                                >
+                                  {"★".repeat(ulasan.rating)}
+                                </span>
+                                <span className="text-[11px] text-[#8B8478]">
                                   {t("account.reviewedOn", {
                                     date: formatTanggal(
                                       ulasan.created_at,
-                                      dateLocale(locale),
+                                      lokale,
                                     ),
                                   })}
                                 </span>
                               </div>
-
-                              {ulasan.comment && (
-                                <p className="mt-2 text-sm leading-6 text-[#706A63]">
-                                  {ulasan.comment}
-                                </p>
-                              )}
-
-                              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-                                <p className="text-[12px] text-[#6BA06B] font-medium">
-                                  {t("account.reviewedThanks")}
-                                </p>
-                                <Link
-                                  href={`/produk/${produkId}`}
-                                  className="text-xs text-[#8B6B5A] hover:text-[#1E1C18] underline underline-offset-4 transition"
-                                >
-                                  {t("account.seeReviewOnProduct")}
-                                </Link>
-                              </div>
+                              <Link
+                                href={`/produk/${produkId}`}
+                                className="text-[11px] text-[#8B6B5A] underline underline-offset-4 transition hover:text-[#1E1C18]"
+                              >
+                                {t("account.seeReviewOnProduct")}
+                              </Link>
                             </div>
-                          ) : (
-                            <ReviewForm
-                              orderItemId={item.id}
-                              productName={item.nama}
-                              variantLabel={item.detail || null}
-                            />
-                          )}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                            {ulasan.comment && (
+                              <p className="mt-1 line-clamp-1 text-[11px] text-[#6B655A]">
+                                “{ulasan.comment}”
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <details className="group">
+                            <summary className="cursor-pointer list-none text-[11px] font-medium text-[#8B6B5A] transition hover:text-[#1E1C18]">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden="true"
+                                  className="text-[14px] leading-none transition-transform group-open:rotate-90"
+                                >
+                                  ›
+                                </span>
+                                {t("account.reviewThisItem")}
+                              </span>
+                            </summary>
+                            <div className="mt-3 rounded-xl bg-[#FAF8F5] p-3">
+                              <ReviewForm
+                                orderItemId={item.id}
+                                productName={item.nama}
+                                variantLabel={item.detail || null}
+                              />
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        {/* RINCIAN DALAM TAB — lebih ringkas, tetap lengkap */}
+        <div className="space-y-4 xl:sticky xl:top-28">
+          <section className={`${kartu} p-5`}>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">
+                {t("account.orderSummary")}
+              </h2>
+              <span className="text-[10px] text-[#9A9389]">
+                #{String(pesanan.id).padStart(6, "0")}
+              </span>
+            </div>
+
+            <div className="mt-4">
+              <OrderDetailTabs
+                tabs={tabs}
+                idPrefix={`order-${pesanan.id}`}
+                ariaLabel={t("account.orderSummary")}
+                defaultTab={dibatalkan && sudahBayar ? "refund" : undefined}
+              />
+            </div>
           </section>
 
-          <div className="space-y-6">
-            {/* ===================== PEMBAYARAN ===================== */}
-            <section className={kartu}>
-              <h2 className="text-base font-semibold mb-5">
-                {t("account.paymentDetails")}
-              </h2>
-
-              <dl className="space-y-3 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B655A]">{t("account.productSubtotal")}</dt>
-                  <dd>{rupiah(subtotal)}</dd>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B655A]">{t("account.shippingCost")}</dt>
-                  <dd>{rupiah(ongkir)}</dd>
-                </div>
-
-                {diskon > 0 && (
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-[#6B655A]">
-                      {t("account.discount")}
-                      {pesanan.voucher_code ? ` (${pesanan.voucher_code})` : ""}
-                    </dt>
-                    <dd>-{rupiah(diskon)}</dd>
-                  </div>
-                )}
-
-                <div className="flex justify-between gap-4 pt-3 border-t border-[#EFEDE8] font-semibold">
-                  <dt>{t("account.total")}</dt>
-                  <dd>{rupiah(total)}</dd>
-                </div>
-              </dl>
-
-              <dl className="mt-5 pt-5 border-t border-[#EFEDE8] space-y-3 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B655A]">{t("account.method")}</dt>
-                  <dd className="text-right">
-                    {labelMetodeBayar(pesanan.payment_method)}
-                  </dd>
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-[#6B655A]">{t("account.status")}</dt>
-                  <dd>
-                    <StatusBadge label={bayar.label} tone={bayar.tone} />
-                  </dd>
-                </div>
-
-                {pesanan.paid_at && (
-                  <div className="flex justify-between gap-4">
-                    <dt className="text-[#6B655A]">
-                      {t("account.paidOnLabel")}
-                    </dt>
-                    <dd className="text-right">
-                      {formatTanggalWaktu(pesanan.paid_at, dateLocale(locale))}
-                    </dd>
-                  </div>
-                )}
-              </dl>
-            </section>
-
-            {/* ===================== PENGIRIMAN ===================== */}
-            <section className={kartu}>
-              <h2 className="text-base font-semibold mb-5">
-                {t("account.shippingSection")}
-              </h2>
-
-              <dl className="space-y-3 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B655A]">{t("account.method")}</dt>
-                  <dd className="text-right">
-                    {labelPengiriman(pesanan.shipping_method, t)}
-                  </dd>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[#6B655A]">
-                    {t("account.trackingNumber")}
-                  </dt>
-                  <dd className="text-right">
-                    {pesanan.tracking_number || t("account.notAvailable")}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="mt-5 pt-5 border-t border-[#EFEDE8]">
-                <p className="text-xs text-[#8B8478] mb-2">
-                  {t("account.shippedTo")}
-                </p>
-
-                {alamat ? (
-                  <address className="not-italic text-sm leading-6">
-                    <p className="font-medium">
-                      {alamat.recipient_name}
-                      {alamat.label && (
-                        <span className="ml-2 text-xs font-normal text-[#8B8478]">
-                          {alamat.label}
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-xs text-[#8B8478]">{alamat.phone}</p>
-                    <p className="mt-2 text-[#4A463F]">{alamat.full_address}</p>
-                    <p className="text-[#4A463F]">
-                      {[alamat.city, alamat.province]
-                        .filter(Boolean)
-                        .join(", ")}{" "}
-                      {alamat.postal_code}
-                    </p>
-                    {alamat.notes && (
-                      <p className="mt-2 text-xs text-[#8B8478]">
-                        {t("account.notes", { notes: alamat.notes })}
-                      </p>
-                    )}
-                  </address>
-                ) : (
-                  <p className="text-sm text-[#8B8478]">
-                    {t("account.addressNotAvailable")}
-                  </p>
-                )}
-              </div>
-            </section>
-
-            {/* ===================== PENGAJUAN REFUND ===================== */}
-            {dibatalkan && sudahBayar && (
-              <section className={kartu}>
-                <h2 className="text-base font-semibold mb-5">
-                  {t("account.refundRequestedTitle")}
-                </h2>
-
-                {refund ? (
-                  <dl className="space-y-3 text-sm">
-                    <div className="flex items-center justify-between gap-4">
-                      <dt className="text-[#6B655A]">
-                        {t("account.refundStatusLabel")}
-                      </dt>
-                      <dd>
-                        <StatusBadge
-                          label={infoRefund(refund.status).label}
-                          tone={infoRefund(refund.status).tone}
-                        />
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-4">
-                      <dt className="text-[#6B655A]">
-                        {t("account.refundAmount")}
-                      </dt>
-                      <dd className="font-medium">
-                        {rupiah(angka(refund.refund_amount ?? pesanan.total))}
-                      </dd>
-                    </div>
-
-                    {refund.reason && (
-                      <div>
-                        <dt className="text-[#6B655A]">
-                          {t("account.refundReasonLabel")}
-                        </dt>
-                        <dd className="mt-1 leading-6 text-[#4A463F]">
-                          {refund.reason}
-                        </dd>
-                      </div>
-                    )}
-
-                    {refund.requested_at && (
-                      <div className="flex justify-between gap-4">
-                        <dt className="text-[#6B655A]">
-                          {t("account.refundRequestedOn", {
-                            date: formatTanggal(
-                              refund.requested_at,
-                              dateLocale(locale),
-                            ),
-                          })}
-                        </dt>
-                      </div>
-                    )}
-
-                    <div>
-                      {infoRefund(refund.status).key === "menunggu" && (
-                        <p className="rounded-xl bg-[#FFF4DB] px-4 py-3 text-xs text-[#8A5A00]">
-                          {t("account.refundPendingDesc")}
-                        </p>
-                      )}
-                      {infoRefund(refund.status).key === "disetujui" && (
-                        <p className="rounded-xl bg-[#E6F4EA] px-4 py-3 text-xs text-[#1E6B3A]">
-                          {t("account.refundApprovedDesc")}
-                        </p>
-                      )}
-                      {infoRefund(refund.status).key === "ditolak" && (
-                        <p className="rounded-xl bg-[#FCE8E6] px-4 py-3 text-xs text-[#B3261E]">
-                          {t("account.refundRejectedDesc")}
-                        </p>
-                      )}
-                    </div>
-                  </dl>
-                ) : (
-                  <RefundRequestButton orderId={pesanan.id} />
-                )}
-              </section>
-            )}
-
-            <Link
-              href="/pesanan"
-              className="inline-flex text-xs text-[#8B8478] underline underline-offset-4 hover:text-[#1E1C18] transition"
-            >
-              {t("account.backToOrders")}
-            </Link>
-          </div>
+          <Link
+            href="/pesanan"
+            className="inline-flex justify-end text-[11px] text-[#8B8478] underline underline-offset-4 transition hover:text-[#1E1C18]"
+          >
+            {t("account.backToOrders")}
+          </Link>
         </div>
+      </div>
 
-        {/* ===================== CHAT PESANAN ===================== */}
-        <ChatWidget
-          contextType="order"
-          contextId={pesanan.id}
-          title={kodePesanan(pesanan.id)}
-          initialConversationId={chatConvId}
-          initialMessages={chatMessages}
-          isSignedIn
-          currentUserId={user.id}
-        />
+      {/* ===================== CHAT PESANAN ===================== */}
+      <ChatWidget
+        contextType="order"
+        contextId={pesanan.id}
+        title={kodePesanan(pesanan.id)}
+        initialConversationId={chatConvId}
+        initialMessages={chatMessages}
+        isSignedIn
+        currentUserId={user.id}
+      />
     </div>
   );
 }

@@ -51,7 +51,7 @@ export default async function AdminEditProductPage({
   );
 
   return (
-    <div>
+    <div className="pb-2">
       <Link
         href="/admin/products"
         className="inline-flex items-center gap-1.5 mb-5 text-[12px] font-medium text-[#8B6B5A] hover:text-[#1E1C18] transition"

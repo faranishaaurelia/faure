@@ -21,15 +21,19 @@ export type ProdukGambar = {
   product_images?: GambarProduk | GambarProduk[] | null;
 };
 
-// Foto utama: pakai gambar produk (product_images) dengan sort_order
-// terkecil dulu — sama seperti halaman koleksi & detail. Kalau galeri kosong,
-// baru fallback ke image_url varian. (Urutan ini penting: image_url varian
-// kadang berisi path lokal yang tidak tersedia, sementara galeri selalu
-// berisi URL storage yang valid.)
+// Foto produk untuk pesanan, keranjang, checkout, dan lemari:
+// 1. Jika varian memiliki foto khusus (varian.image_url), prioritaskan foto varian tersebut
+//    (misal: user memilih baju warna biru, maka tampilkan foto varian biru).
+// 2. Jika varian tidak memiliki foto khusus, fallback ke foto galeri produk (product_images)
+//    dengan sort_order terkecil.
 export function fotoProduk(
   varian: VarianGambar | null | undefined,
   produk: ProdukGambar | null | undefined,
 ): string | null {
+  if (varian?.image_url && varian.image_url.trim() !== "") {
+    return varian.image_url;
+  }
+
   const gambar = Array.isArray(produk?.product_images)
     ? produk.product_images
     : produk?.product_images
@@ -42,5 +46,5 @@ export function fotoProduk(
       .map((img) => img.url)
       .find(Boolean) ?? null;
 
-  return gambarProduk ?? varian?.image_url ?? null;
+  return gambarProduk ?? null;
 }

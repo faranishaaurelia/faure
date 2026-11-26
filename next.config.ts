@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Sembunyikan indikator Devtools Next.js yang muncul sebagai kotak hitam
+  // di pojok bawah saat mode development.
+  devIndicators: false,
   experimental: {
     serverActions: {
       // Batas default 1 MB tidak cukup untuk upload gambar produk & avatar

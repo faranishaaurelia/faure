@@ -4,6 +4,7 @@ import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import ConfirmButton from "@/components/admin/ConfirmButton";
 import { deleteReview } from "@/lib/actions/admin";
 import { formatTanggal } from "@/lib/orders";
+import SortSelect from "@/components/admin/SortSelect";
 
 const styleSvg = {
   width: 18,
@@ -73,12 +74,37 @@ function Bintang({ rating }: { rating: number }) {
 
 const PER_HALAMAN = 10;
 
+const SORT_ULASAN = [
+  { value: "terbaru", label: "Terbaru" },
+  { value: "terlama", label: "Terlama" },
+  { value: "rating-tinggi", label: "Rating tertinggi" },
+  { value: "rating-rendah", label: "Rating terendah" },
+  { value: "produk-az", label: "Produk A–Z" },
+];
+
+type SortUlasan = (typeof SORT_ULASAN)[number]["value"];
+
+const FILTER_RATING = [
+  { value: "", label: "Semua Rating" },
+  { value: "5", label: "5 bintang" },
+  { value: "4", label: "4 bintang" },
+  { value: "3", label: "3 bintang" },
+  { value: "2", label: "2 bintang" },
+  { value: "1", label: "1 bintang" },
+];
+
 export default async function AdminReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    page?: string;
+    sort?: string;
+    rating?: string;
+  }>;
 }) {
-  const { q, page: pageParam } = await searchParams;
+  const { q, page: pageParam, sort: sortParam, rating: ratingParam } =
+    await searchParams;
   const supabase = await createClient();
 
   const { data } = await supabase
@@ -121,16 +147,65 @@ export default async function AdminReviewsPage({
         })
       : semuaReviews;
 
+  // ---------- Filter rating ----------
+  const ratingAktif = FILTER_RATING.some(
+    (r) => r.value === ratingParam && r.value !== "",
+  )
+    ? (ratingParam as string)
+    : "";
+
+  const reviewsRating = ratingAktif
+    ? reviewsTerfilter.filter(
+        (r) => Number(r.rating) === Number(ratingAktif),
+      )
+    : reviewsTerfilter;
+
+  const deskripsiFilter = [
+    kata.length > 0 ? `kata kunci "${kata}"` : null,
+    ratingAktif ? `rating ${ratingAktif} bintang` : null,
+  ]
+    .filter(Boolean)
+    .join(" dan ");
+
+  // ---------- Urutan ----------
+  const sort: SortUlasan = SORT_ULASAN.some((s) => s.value === sortParam)
+    ? (sortParam as SortUlasan)
+    : "terbaru";
+
+  const namaProdukUlasan = (r: (typeof semuaReviews)[number]) =>
+    satu(r.products)?.name ?? "";
+
+  const reviewsTerurut = [...reviewsRating].sort((a, b) => {
+    switch (sort) {
+      case "terlama":
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      case "rating-tinggi":
+        return Number(b.rating ?? 0) - Number(a.rating ?? 0);
+      case "rating-rendah":
+        return Number(a.rating ?? 0) - Number(b.rating ?? 0);
+      case "produk-az":
+        return namaProdukUlasan(a).localeCompare(namaProdukUlasan(b), "id");
+      default:
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    }
+  });
+
   // ---------- Pagination ----------
   const halamanSekarang = Math.max(1, parseInt(pageParam ?? "1", 10));
-  const totalHalaman = Math.ceil(reviewsTerfilter.length / PER_HALAMAN);
+  const totalHalaman = Math.ceil(reviewsTerurut.length / PER_HALAMAN);
   const halamanValid = Math.min(halamanSekarang, Math.max(1, totalHalaman));
   const mulai = (halamanValid - 1) * PER_HALAMAN;
-  const reviews = reviewsTerfilter.slice(mulai, mulai + PER_HALAMAN);
+  const reviews = reviewsTerurut.slice(mulai, mulai + PER_HALAMAN);
 
   function hrefHalaman(h: number) {
     const params = new URLSearchParams();
     if (kata) params.set("q", q!);
+    if (sort !== "terbaru") params.set("sort", sort);
+    if (ratingAktif) params.set("rating", ratingAktif);
     if (h > 1) params.set("page", String(h));
     const qs = params.toString();
     return `/admin/reviews${qs ? `?${qs}` : ""}`;
@@ -207,6 +282,12 @@ export default async function AdminReviewsPage({
       {/* ===== Pencarian ===== */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
         <form action="/admin/reviews" method="GET" className="flex-1 max-w-md">
+          {sort !== "terbaru" && (
+            <input type="hidden" name="sort" value={sort} />
+          )}
+          {ratingAktif && (
+            <input type="hidden" name="rating" value={ratingAktif} />
+          )}
           <div className="relative">
             <span
               aria-hidden
@@ -237,9 +318,30 @@ export default async function AdminReviewsPage({
           </div>
         </form>
 
-        <p className="text-[12px] text-[#8A837B]">
-          Menampilkan {reviewsTerfilter.length} dari {semuaReviews.length} ulasan
-          {kata.length > 0 && (
+        <SortSelect
+          value={ratingAktif}
+          options={FILTER_RATING}
+          paramName="rating"
+          baseParams={{
+            q,
+            sort: sort !== "terbaru" ? sort : undefined,
+          }}
+          ariaLabel="Filter rating ulasan"
+        />
+
+        <SortSelect
+          value={sort}
+          options={SORT_ULASAN}
+          baseParams={{
+            q,
+            rating: ratingAktif || undefined,
+          }}
+          ariaLabel="Urutkan ulasan"
+        />
+
+        <p className="text-[12px] text-[#8A837B] sm:ml-auto">
+          Menampilkan {reviewsTerurut.length} dari {semuaReviews.length} ulasan
+          {(kata.length > 0 || ratingAktif) && (
             <Link
               href="/admin/reviews"
               className="ml-1.5 text-[#8B6B5A] hover:text-[#1E1C18] underline underline-offset-4 transition"
@@ -314,12 +416,12 @@ export default async function AdminReviewsPage({
                   <p className="mt-3 text-sm font-medium text-[#1E1C18]">
                     {semuaReviews.length === 0
                       ? "Belum ada ulasan."
-                      : `Tidak ada ulasan yang cocok dengan "${kata}".`}
+                      : `Tidak ada ulasan yang cocok${deskripsiFilter ? ` dengan ${deskripsiFilter}` : ""}.`}
                   </p>
                   <p className="mt-1 text-sm text-[#8A837B]">
                     {semuaReviews.length === 0
                       ? "Ulasan pembeli akan muncul di sini."
-                      : "Coba kata kunci lain."}
+                      : "Coba ubah filter atau kata kunci lain."}
                   </p>
                   {semuaReviews.length > 0 && (
                     <Link
@@ -340,7 +442,7 @@ export default async function AdminReviewsPage({
       {totalHalaman > 1 && (
         <div className="mt-4 flex items-center justify-between gap-4 text-[13px]">
           <p className="text-[#8A837B]">
-            Menampilkan {mulai + 1}–{Math.min(mulai + PER_HALAMAN, reviewsTerfilter.length)} dari {reviewsTerfilter.length} ulasan
+            Menampilkan {mulai + 1}–{Math.min(mulai + PER_HALAMAN, reviewsTerurut.length)} dari {reviewsTerurut.length} ulasan
           </p>
           <div className="flex items-center gap-1">
             <Link

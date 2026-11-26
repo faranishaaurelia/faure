@@ -1,269 +1,368 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
-import { kodePesanan } from "@/lib/orders";
-import { dictionaries } from "@/lib/i18n/dictionaries";
-import { translate } from "@/lib/i18n/translate";
-import { formatChatWaktu } from "@/lib/chat";
+import MarkChatRead from "@/components/chat/MarkChatRead";
+import AdminReplyBox from "@/components/chat/AdminReplyBox";
+import SortSelect from "@/components/admin/SortSelect";
 
 export const dynamic = "force-dynamic";
 
-type ConversationAdmin = {
-  id: number;
-  context_type: string;
-  context_id: number;
-  user_id: string;
-  created_at: string;
-  last_message_at: string | null;
-  profiles:
-    | { full_name: string | null }
-    | { full_name: string | null }[]
-    | null;
+const SORT_CHAT = [
+  { value: "terbaru", label: "Terbaru" },
+  { value: "terlama", label: "Terlama" },
+  { value: "belum-dibaca", label: "Belum dibaca" },
+  { value: "nama-az", label: "Nama A–Z" },
+];
+
+type SortChat = (typeof SORT_CHAT)[number]["value"];
+
+type Tab = "semua" | "produk" | "pesanan";
+
+// Nilai context_type di database: 'product' dan 'order'
+const TAB_KE_TIPE: Record<Exclude<Tab, "semua">, string> = {
+  produk: "product",
+  pesanan: "order",
 };
 
-type PesanAdmin = {
-  conversation_id: number;
-  sender_id: string;
-  content: string;
-  is_read: boolean;
-  created_at: string;
-};
-
-function satu<T>(v: T | T[] | null | undefined): T | null {
-  if (Array.isArray(v)) return v[0] ?? null;
-  return v ?? null;
+function waktu(iso: string | null | undefined) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("id-ID", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  });
 }
 
-const t = (key: string, vars?: Record<string, string | number>) =>
-  translate(dictionaries.id, key, vars);
-
-const PER_HALAMAN = 10;
+function potong(teks: string, maks = 60) {
+  return teks.length > maks ? `${teks.slice(0, maks)}…` : teks;
+}
 
 export default async function AdminChatPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ tab?: string; room?: string; sort?: string }>;
 }) {
-  const { page: pageParam } = await searchParams;
+  const {
+    tab: tabParam,
+    room: roomParam,
+    sort: sortParam,
+  } = await searchParams;
+  const tab: Tab =
+    tabParam === "produk" || tabParam === "pesanan" ? tabParam : "semua";
+  const roomId = roomParam ? Number(roomParam) : null;
+
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data: conversations } = await supabase
+  // ---------- 1. Semua room obrolan (terbaru di atas) ----------
+  const { data: konversiData } = await supabase
     .from("conversations")
-    .select(
-      "id, context_type, context_id, user_id, created_at, last_message_at, profiles ( full_name )",
-    )
-    .order("last_message_at", { ascending: false });
+    .select("id, context_type, context_id, user_id, last_message_at")
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(200);
 
-  const daftar = (conversations ?? []) as unknown as ConversationAdmin[];
+  const semuaRoom = konversiData ?? [];
+  const idRoom = semuaRoom.map((c) => c.id);
 
-  // ---------- Pesan per conversation (untuk preview & unread) ----------
-  const convIds = daftar.map((c) => c.id);
-  const { data: semuaPesan } =
-    convIds.length > 0
-      ? await supabase
+  // ---------- 2. Pesan, nama pembeli, nama produk ----------
+  const idProduk = semuaRoom
+    .filter((c) => c.context_type === "product")
+    .map((c) => c.context_id);
+  const idUser = [...new Set(semuaRoom.map((c) => c.user_id))];
+
+  const [pesanRes, profilRes, produkRes] = await Promise.all([
+    idRoom.length
+      ? supabase
           .from("messages")
           .select(
-            "conversation_id, sender_id, content, is_read, created_at",
+            "id, conversation_id, sender_id, content, is_read, created_at",
           )
-          .in("conversation_id", convIds)
-          .order("created_at", { ascending: true })
-      : { data: [] };
+          .in("conversation_id", idRoom)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
+    idUser.length
+      ? supabase.from("profiles").select("id, full_name").in("id", idUser)
+      : Promise.resolve({ data: [] }),
+    idProduk.length
+      ? supabase.from("products").select("id, name").in("id", idProduk)
+      : Promise.resolve({ data: [] }),
+  ]);
 
-  const pesanMap = new Map<number, PesanAdmin[]>();
-  for (const m of (semuaPesan ?? []) as PesanAdmin[]) {
-    const arr = pesanMap.get(m.conversation_id) ?? [];
-    arr.push(m);
-    pesanMap.set(m.conversation_id, arr);
-  }
-
-  // Filter percakapan yang hanya memiliki pesan
-  const daftarValid = daftar.filter((c) => (pesanMap.get(c.id)?.length ?? 0) > 0);
-
-  // ---------- Nama produk utk konteks product ----------
-  const productIds = [
-    ...new Set(
-      daftarValid
-        .filter((c) => c.context_type === "product")
-        .map((c) => c.context_id),
-    ),
-  ];
-  const { data: products } =
-    productIds.length > 0
-      ? await supabase
-          .from("products")
-          .select("id, name")
-          .in("id", productIds)
-      : { data: [] };
-
+  const semuaPesan = pesanRes.data ?? [];
+  const namaUser = new Map(
+    (profilRes.data ?? []).map((p) => [p.id, p.full_name as string | null]),
+  );
   const namaProduk = new Map(
-    (products ?? []).map((p) => [p.id, p.name as string]),
+    (produkRes.data ?? []).map((p) => [p.id, p.name as string]),
   );
 
-  // ---------- Label konteks ----------
-  const labelKonteks = (c: ConversationAdmin) =>
-    c.context_type === "product"
-      ? (namaProduk.get(c.context_id) ?? `Produk #${c.context_id}`)
-      : kodePesanan(c.context_id);
+  // ---------- 3. Ringkasan tiap room ----------
+  const ringkasan = semuaRoom.map((c) => {
+    const pesanRoom = semuaPesan.filter((m) => m.conversation_id === c.id);
+    // Belum dibaca = pesan dari pembeli yang belum ditandai dibaca
+    const belumDibaca = pesanRoom.filter(
+      (m) => m.sender_id === c.user_id && !m.is_read,
+    ).length;
 
-  const jenisLabel = (c: ConversationAdmin) =>
-    c.context_type === "product" ? "Produk" : "Pesanan";
+    const label =
+      c.context_type === "product"
+        ? `Produk: ${namaProduk.get(c.context_id) ?? `#${c.context_id}`}`
+        : `Pesanan #${c.context_id}`;
 
-  const totalUnread = [...pesanMap.values()].reduce(
-    (sum, arr) =>
-      sum +
-      arr.filter((m) => user && m.sender_id !== user.id && !m.is_read).length,
-    0,
-  );
+    return {
+      ...c,
+      label,
+      pembeli: namaUser.get(c.user_id) || "Pengguna",
+      pesanTerakhir: pesanRoom[0] ?? null, // urutan terbaru dulu
+      belumDibaca,
+    };
+  });
 
-  // ---------- Pagination ----------
-  const halamanSekarang = Math.max(1, parseInt(pageParam ?? "1", 10));
-  const totalHalaman = Math.ceil(daftarValid.length / PER_HALAMAN);
-  const halamanValid = Math.min(halamanSekarang, Math.max(1, totalHalaman));
-  const mulai = (halamanValid - 1) * PER_HALAMAN;
-  const daftarTampil = daftarValid.slice(mulai, mulai + PER_HALAMAN);
+  // ---------- 4. Hitungan untuk tab ----------
+  const hitung = (tipe?: string) => {
+    const daftar = tipe
+      ? ringkasan.filter((r) => r.context_type === tipe)
+      : ringkasan;
+    return {
+      total: daftar.length,
+      belumDibaca: daftar.filter((r) => r.belumDibaca > 0).length,
+    };
+  };
 
-  function hrefHalaman(h: number) {
-    return h > 1 ? `/admin/chat?page=${h}` : "/admin/chat";
+  const tabs: { key: Tab; label: string; jumlah: ReturnType<typeof hitung> }[] =
+    [
+      { key: "semua", label: "Semua", jumlah: hitung() },
+      { key: "produk", label: "Produk", jumlah: hitung("product") },
+      { key: "pesanan", label: "Pesanan", jumlah: hitung("order") },
+    ];
+
+  const daftarTampil =
+    tab === "semua"
+      ? ringkasan
+      : ringkasan.filter((r) => r.context_type === TAB_KE_TIPE[tab]);
+
+  // ---------- Urutan ----------
+  const sort: SortChat = SORT_CHAT.some((s) => s.value === sortParam)
+    ? (sortParam as SortChat)
+    : "terbaru";
+
+  const waktuPesan = (iso: string | null | undefined) =>
+    iso ? new Date(iso).getTime() : 0;
+
+  const daftarTerurut = [...daftarTampil].sort((a, b) => {
+    switch (sort) {
+      case "terlama": {
+        const aWaktu = waktuPesan(a.last_message_at) || Number.MAX_SAFE_INTEGER;
+        const bWaktu = waktuPesan(b.last_message_at) || Number.MAX_SAFE_INTEGER;
+        return aWaktu - bWaktu;
+      }
+      case "belum-dibaca": {
+        const selisih = b.belumDibaca - a.belumDibaca;
+        if (selisih !== 0) return selisih;
+        return waktuPesan(b.last_message_at) - waktuPesan(a.last_message_at);
+      }
+      case "nama-az":
+        return a.pembeli.localeCompare(b.pembeli, "id");
+      default:
+        return waktuPesan(b.last_message_at) - waktuPesan(a.last_message_at);
+    }
+  });
+
+  // ---------- 5. Room yang sedang dibuka ----------
+  const roomAktif = roomId
+    ? (ringkasan.find((r) => r.id === roomId) ?? null)
+    : null;
+  const isiObrolan = roomAktif
+    ? semuaPesan
+        .filter((m) => m.conversation_id === roomAktif.id)
+        .sort(
+          (a, b) =>
+            new Date(a.created_at ?? 0).getTime() -
+            new Date(b.created_at ?? 0).getTime(),
+        )
+    : [];
+
+  function href(t: Tab, room?: number) {
+    const params = new URLSearchParams();
+    if (t !== "semua") params.set("tab", t);
+    if (room) params.set("room", String(room));
+    if (sort !== "terbaru") params.set("sort", sort);
+    const qs = params.toString();
+    return `/admin/chat${qs ? `?${qs}` : ""}`;
   }
-
 
   return (
     <div>
       <AdminPageHeader
         title="Chat"
-        description="Balas pertanyaan pelanggan — chat produk maupun chat pesanan."
-        action={
-          totalUnread > 0 ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#B3261E] px-3.5 py-1.5 text-[12px] font-semibold text-white">
-              {totalUnread} belum dibaca
-            </span>
-          ) : undefined
-        }
+        description="Pesan dari pelanggan tentang produk dan pesanan mereka."
       />
 
-      <div className="admin-card overflow-hidden">
-        {daftarValid.length === 0 ? (
-          <div className="px-6 py-16 text-center">
-            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#F7F3EE] text-[#B7AEA3]">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+      {/* ===== Tab & urutan ===== */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
+        <div className="flex flex-wrap gap-2 sm:flex-1">
+          {tabs.map((t) => {
+            const aktif = t.key === tab;
+            return (
+              <Link
+                key={t.key}
+                href={href(t.key)}
+                aria-current={aktif ? "page" : undefined}
+                className={`inline-flex items-center gap-2 h-10 px-4 rounded-full border text-[13px] font-medium transition ${
+                  aktif
+                    ? "border-[#1E1C18] bg-[#1E1C18] text-white"
+                    : "border-[#E7E5E0] bg-white text-[#6B655A] hover:border-[#1E1C18]"
+                }`}
               >
-                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-              </svg>
-            </span>
-            <p className="mt-3 text-sm font-medium text-[#1E1C18]">
-              Belum ada percakapan.
-            </p>
-            <p className="mt-1 text-sm text-[#8A837B]">
-              Chat dari pelanggan (produk & pesanan) akan muncul di sini.
-            </p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-[#EFEDE8]">
-            {daftarTampil.map((c) => {
-              const pesan = pesanMap.get(c.id) ?? [];
-              const terakhir = pesan[pesan.length - 1] ?? null;
-              const unread = user
-                ? pesan.filter(
-                    (m) => m.sender_id !== user.id && !m.is_read,
-                  ).length
-                : 0;
-              const profil = satu(c.profiles);
-              const nama = profil?.full_name ?? "Pelanggan";
-              const inisial = nama.trim().charAt(0).toUpperCase() || "?";
+                {t.label}
+                <span className={aktif ? "text-white/70" : "text-[#9A7B69]"}>
+                  {t.jumlah.total}
+                </span>
+                {t.jumlah.belumDibaca > 0 && (
+                  <span className="inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-[#B3261E] px-1.5 text-[10px] font-semibold text-white">
+                    {t.jumlah.belumDibaca}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
 
-              return (
-                <li key={c.id}>
-                  <Link
-                    href={`/admin/chat/${c.id}`}
-                    className="flex items-center gap-4 px-5 py-4 transition hover:bg-[#FAF7F3]"
-                  >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#F0E9E2] font-semibold text-[#8B6B5A]">
-                      {inisial}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-[#1E1C18]">
-                          {nama}
-                        </p>
-                        <span className="shrink-0 rounded-full bg-[#F3EFE9] px-2 py-0.5 text-[10px] font-medium text-[#8B6B5A]">
-                          {jenisLabel(c)}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 truncate text-[12px] text-[#8A837B]">
-                        {labelKonteks(c)}
-                      </p>
-                      <p className="mt-1 truncate text-[12px] text-[#5C554D]">
-                        {terakhir ? terakhir.content : "Belum ada pesan"}
-                      </p>
-                    </div>
-
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <span className="text-[11px] text-[#A39B92]">
-                        {terakhir
-                          ? formatChatWaktu(terakhir.created_at, t, "id-ID")
-                          : formatChatWaktu(c.created_at, t, "id-ID")}
-                      </span>
-                      {unread > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#B3261E] px-1.5 text-[10px] font-bold text-white">
-                          {unread}
-                        </span>
-                      )}
-                    </div>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <SortSelect
+          value={sort}
+          options={SORT_CHAT}
+          baseParams={{
+            tab: tab !== "semua" ? tab : undefined,
+            room: roomId ? String(roomId) : undefined,
+          }}
+          ariaLabel="Urutkan chat"
+        />
       </div>
 
-      {/* ===== Pagination ===== */}
-      {totalHalaman > 1 && (
-        <div className="mt-4 flex items-center justify-between gap-4 text-[13px]">
-          <p className="text-[#8A837B]">
-            Menampilkan {mulai + 1}–{Math.min(mulai + PER_HALAMAN, daftarValid.length)} dari {daftarValid.length} percakapan
-          </p>
-          <div className="flex items-center gap-1">
-            <Link
-              href={hrefHalaman(halamanValid - 1)}
-              aria-disabled={halamanValid <= 1}
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition ${halamanValid <= 1 ? "pointer-events-none border-[#E7E5E0] text-[#C0B8AE]" : "border-[#E7E5E0] text-[#6B655A] hover:border-[#1E1C18]"}`}
-            >
-              ←
-            </Link>
-            {Array.from({ length: totalHalaman }, (_, i) => i + 1).map((h) => (
-              <Link
-                key={h}
-                href={hrefHalaman(h)}
-                aria-current={h === halamanValid ? "page" : undefined}
-                className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-[12px] font-medium transition ${h === halamanValid ? "border-[#1E1C18] bg-[#1E1C18] text-white" : "border-[#E7E5E0] text-[#6B655A] hover:border-[#1E1C18]"}`}
-              >
-                {h}
-              </Link>
-            ))}
-            <Link
-              href={hrefHalaman(halamanValid + 1)}
-              aria-disabled={halamanValid >= totalHalaman}
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition ${halamanValid >= totalHalaman ? "pointer-events-none border-[#E7E5E0] text-[#C0B8AE]" : "border-[#E7E5E0] text-[#6B655A] hover:border-[#1E1C18]"}`}
-            >
-              →
-            </Link>
-          </div>
+      <div className="grid lg:grid-cols-[360px_1fr] gap-4 items-start">
+        {/* ===== Daftar room ===== */}
+        <div className="bg-white rounded-[22px] border border-black/5 shadow-sm overflow-y-auto max-h-[640px]">
+          {daftarTerurut.length === 0 ? (
+            <p className="px-5 py-12 text-center text-[13px] text-[#8A837B]">
+              Belum ada obrolan di sini.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[#F0ECE6]">
+              {daftarTerurut.map((r) => {
+                const dipilih = r.id === roomAktif?.id;
+                return (
+                  <li key={r.id}>
+                    <Link
+                      href={href(tab, r.id)}
+                      className={`block px-5 py-4 transition ${
+                        dipilih ? "bg-[#F7F3EE]" : "hover:bg-[#FAF7F3]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[13px] font-semibold truncate">
+                          {r.pembeli}
+                        </p>
+                        <span className="shrink-0 text-[11px] text-[#8A837B]">
+                          {waktu(r.last_message_at)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] font-medium text-[#8B6B5A] truncate">
+                        {r.label}
+                      </p>
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <p className="text-[12px] text-[#716A63] truncate">
+                          {r.pesanTerakhir
+                            ? potong(r.pesanTerakhir.content)
+                            : "Belum ada pesan"}
+                        </p>
+                        {r.belumDibaca > 0 && (
+                          <span className="inline-flex min-w-[20px] h-5 items-center justify-center rounded-full bg-[#B3261E] px-1.5 text-[10px] font-semibold text-white">
+                            {r.belumDibaca}
+                          </span>
+                        )}
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-      )}
+
+        {/* ===== Isi obrolan ===== */}
+        <div className="bg-white rounded-[22px] border border-black/5 shadow-sm min-h-[420px] flex flex-col">
+          {!roomAktif ? (
+            <div className="flex-1 flex items-center justify-center px-6 py-20">
+              <p className="text-[13px] text-[#8A837B]">
+                Pilih obrolan di sebelah kiri untuk membacanya.
+              </p>
+            </div>
+          ) : (
+            <>
+              <MarkChatRead
+                conversationId={roomAktif.id}
+                unreadCount={roomAktif.belumDibaca}
+              />
+              <div className="px-5 py-4 border-b border-[#F0ECE6]">
+                <p className="text-[14px] font-semibold">{roomAktif.pembeli}</p>
+                <Link
+                  href={
+                    roomAktif.context_type === "product"
+                      ? `/admin/products/${roomAktif.context_id}`
+                      : `/admin/orders/${roomAktif.context_id}`
+                  }
+                  className="text-[12px] text-[#8B6B5A] hover:text-[#1E1C18] underline underline-offset-4 transition"
+                >
+                  {roomAktif.label}
+                </Link>
+              </div>
+
+              <div className="flex-1 px-5 py-5 space-y-3 overflow-y-auto max-h-[520px]">
+                {isiObrolan.length === 0 ? (
+                  <p className="text-center text-[13px] text-[#8A837B]">
+                    Belum ada pesan.
+                  </p>
+                ) : (
+                  isiObrolan.map((m) => {
+                    const dariPembeli = m.sender_id === roomAktif.user_id;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex ${dariPembeli ? "justify-start" : "justify-end"}`}
+                      >
+                        <div
+                          className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-[13px] whitespace-pre-wrap break-words ${
+                            dariPembeli
+                              ? "bg-[#F3F1EC] text-[#1E1C18]"
+                              : "bg-[#1E1C18] text-white"
+                          }`}
+                        >
+                          {m.content}
+                          <p
+                            className={`mt-1 text-[10px] ${
+                              dariPembeli ? "text-[#8A837B]" : "text-white/60"
+                            }`}
+                          >
+                            {waktu(m.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="px-5 py-4 border-t border-[#F0ECE6]">
+                <AdminReplyBox
+                  key={roomAktif.id}
+                  conversationId={roomAktif.id}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export default function ProfileSidebar({
       })
     : bergabungSejak ?? "";
 
-  const menu = [
+  const semuaMenu = [
     {
       href: "/profile",
       label: t("account.profile"),
@@ -154,6 +154,11 @@ export default function ProfileSidebar({
       ),
     },
   ];
+
+  // Admin hanya melihat opsi profil (dashboard admin & keluar ditambahkan di bawah).
+  const menu = isAdmin
+    ? semuaMenu.filter((item) => item.href === "/profile")
+    : semuaMenu;
 
   function handleFileChange() {
     if (!fileInputRef.current?.files?.[0]) return;
@@ -269,7 +274,7 @@ export default function ProfileSidebar({
           {isAdmin && (
             <Link
               href="/admin/dashboard"
-              className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#1E1C18] text-white hover:bg-[#3A362F] transition mt-1"
+              className="flex items-center gap-3 px-4 py-3 rounded-2xl transition text-[#333] hover:bg-[#F3F1EC] mt-1"
             >
               <svg
                 width="18"

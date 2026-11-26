@@ -61,6 +61,26 @@ function cutoutUtama(
   );
 }
 
+// Pilih gambar untuk satu varian. Urutan prioritas:
+// 1. Versi transparan dari foto produk yang dipilih varian ini
+// 2. Foto varian yang memang sudah PNG / cutout
+// 3. Foto varian itu sendiri (walau masih ada background)
+// 4. Cadangan: cutout foto utama produk, lalu foto pertama produk
+function pilihGambar(
+  fotoVarian: string | null | undefined,
+  cutoutMap: Map<string, string>,
+  cadanganCutout: string | null,
+  cadanganUrl: string | null | undefined,
+): string | null {
+  const raw = (fotoVarian ?? "").trim();
+  if (raw) {
+    const cutout = cutoutMap.get(raw);
+    if (cutout) return cutout;
+    return raw;
+  }
+  return cadanganCutout ?? cadanganUrl ?? null;
+}
+
 // Pilih varian default untuk item yang ditambahkan dari katalog toko:
 // BuatOutfit belum punya UI pilih ukuran/warna, jadi saat "Beli Semua
 // Item Ini" / checkout dipakai, kita perlu satu variant_id per produk.
@@ -76,6 +96,8 @@ function variantDefault(
 // =====================================================
 // PAGE
 // =====================================================
+
+export const dynamic = "force-dynamic";
 
 export default async function BuatOutfitPage() {
   const { t } = await getT();
@@ -119,31 +141,112 @@ export default async function BuatOutfitPage() {
   }));
   const kategoriPerId = new Map(kategoriList.map((k) => [k.id, k.nama]));
 
-  // Item toko: utamakan cutout (PNG transparan), lalu foto utama
-  // (sort_order terkecil), lalu image_url varian sebagai cadangan terakhir.
-  const produkToko = (productsData ?? []).map((produk) => {
-    const variants = produk.product_variants ?? [];
+  // Item toko:
+  // Produk dengan beberapa warna tampil 1 kartu per warna.
+  // Varian dengan warna sama tapi beda ukuran hanya tampil 1 kartu.
+  const produkToko: {
+    id: number;
+    productId: number;
+    variantId: number | null;
+    nama: string;
+    kategoriId: number | null;
+    kategori: string;
+    gambar: string | null;
+  }[] = [];
 
+  for (const produk of productsData ?? []) {
+    const variants = produk.product_variants ?? [];
     const galeri = [...(produk.product_images ?? [])].sort(
       (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
     );
 
-    const gambar =
-      cutoutUtama(galeri) ??
-      galeri[0]?.url ??
-      variants.find((v) => v.image_url)?.image_url ??
-      null;
+    const kategoriId = produk.category_id ?? null;
+    const kategoriNama =
+      kategoriId != null ? (kategoriPerId.get(kategoriId) ?? "") : "";
 
-    return {
-      id: produk.id,
-      productId: produk.id,
-      variantId: variantDefault(variants),
-      nama: produk.name,
-      kategoriId: produk.category_id ?? null,
-      kategori: kategoriPerId.get(produk.category_id) ?? "",
-      gambar,
-    };
-  });
+    // Map URL foto asli -> cutout_url
+    const cutoutMap = new Map<string, string>();
+    for (const g of galeri) {
+      if (g.url && g.cutout_url) {
+        cutoutMap.set(g.url, g.cutout_url);
+      }
+    }
+
+    const fotoUtamaCutout = cutoutUtama(galeri);
+    const fotoUtamaUrl = galeri[0]?.url ?? null;
+
+    // Kelompokkan varian per warna. Dari tiap warna, pilih 1 varian yang
+    // mewakili: utamakan yang ada stoknya, lalu yang punya foto.
+    const warnaUnikMap = new Map<string, (typeof variants)[0]>();
+
+    for (const v of variants) {
+      const warna = (v.color ?? "").trim();
+      if (!warna) continue;
+
+      const key = warna.toLowerCase();
+      const lama = warnaUnikMap.get(key);
+
+      if (!lama) {
+        warnaUnikMap.set(key, v);
+        continue;
+      }
+
+      const lamaAdaStok = (lama.stock ?? 0) > 0;
+      const baruAdaStok = (v.stock ?? 0) > 0;
+      const lamaAdaFoto = Boolean((lama.image_url ?? "").trim());
+      const baruAdaFoto = Boolean((v.image_url ?? "").trim());
+
+      if (
+        (!lamaAdaStok && baruAdaStok) ||
+        (lamaAdaStok === baruAdaStok && !lamaAdaFoto && baruAdaFoto)
+      ) {
+        warnaUnikMap.set(key, v);
+      }
+    }
+
+    const daftarWarnaUnik = Array.from(warnaUnikMap.values());
+
+    if (daftarWarnaUnik.length > 1) {
+      // Produk punya lebih dari 1 warna: 1 kartu per warna
+      for (const v of daftarWarnaUnik) {
+        const labelWarna = v.color?.trim() ? ` - ${v.color.trim()}` : "";
+
+        produkToko.push({
+          id: v.id,
+          productId: produk.id,
+          variantId: v.id,
+          nama: `${produk.name}${labelWarna}`,
+          kategoriId,
+          kategori: kategoriNama,
+          gambar: pilihGambar(
+            v.image_url,
+            cutoutMap,
+            fotoUtamaCutout,
+            fotoUtamaUrl,
+          ),
+        });
+      }
+    } else {
+      // Hanya 1 warna atau hanya beda ukuran: 1 kartu saja
+      const idDefault = variantDefault(variants);
+      const vDefault = variants.find((v) => v.id === idDefault) ?? variants[0];
+
+      produkToko.push({
+        id: produk.id,
+        productId: produk.id,
+        variantId: idDefault,
+        nama: produk.name,
+        kategoriId,
+        kategori: kategoriNama,
+        gambar: pilihGambar(
+          vDefault?.image_url,
+          cutoutMap,
+          fotoUtamaCutout,
+          fotoUtamaUrl,
+        ),
+      });
+    }
+  }
 
   // Item lemari: pakaian milik pengguna yang sudah dibeli.
   // Kalau belum login, daftarnya kosong (tab "Lemari Saya" menampilkan
@@ -189,7 +292,7 @@ export default async function BuatOutfitPage() {
       .eq("user_id", user.id)
       .order("added_at", { ascending: false });
 
-    itemLemari = ((closetItems ?? []) as unknown as BarisLemari[])
+    const rawItemLemari = ((closetItems ?? []) as unknown as BarisLemari[])
       .map((item) => {
         const variant = satu(item.product_variants);
         const product = variant ? satu(variant.products) : null;
@@ -198,27 +301,53 @@ export default async function BuatOutfitPage() {
         // checkout / link ke detail produk — jadi dilewati saja.
         if (!variant || !product) return null;
 
+        const galeriProduk = product.product_images
+          ? Array.isArray(product.product_images)
+            ? product.product_images
+            : [product.product_images]
+          : [];
+
+        const cutoutMap = new Map<string, string>();
+        for (const g of galeriProduk as GambarDenganCutout[]) {
+          if (g.url && g.cutout_url) cutoutMap.set(g.url, g.cutout_url);
+        }
+
+        const warna = (variant.color ?? "").trim();
+
         return {
           id: item.id,
           productId: product.id,
           variantId: variant.id,
-          nama: product.name ?? t("common.product"),
+          warna,
+          nama: `${product.name ?? t("common.product")}${warna ? ` - ${warna}` : ""}`,
           kategori:
             product.category_id != null
               ? (kategoriPerId.get(product.category_id) ?? "")
               : "",
-          // Cutout dulu; kalau belum ada, pakai logika foto lama.
+          // Foto varian yang dibeli dulu (versi transparan kalau ada),
+          // baru cadangan lama.
           gambar:
-            cutoutUtama(
-              product.product_images as
-                | GambarDenganCutout
-                | GambarDenganCutout[]
-                | null
-                | undefined,
+            pilihGambar(
+              variant.image_url,
+              cutoutMap,
+              cutoutUtama(galeriProduk as GambarDenganCutout[]),
+              null,
             ) ?? fotoProduk(variant, product),
         };
       })
-      .filter((x): x is (typeof itemLemari)[number] => x !== null);
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    // Barang yang sama (produk + warna sama) yang dibeli berkali-kali
+    // hanya muncul 1 kali.
+    const seen = new Set<string>();
+    itemLemari = rawItemLemari
+      .filter((item) => {
+        const key = `${item.productId}|${item.warna.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map(({ warna: _warna, ...sisanya }) => sisanya);
   }
 
   return (

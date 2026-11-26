@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   saveProduct,
@@ -22,7 +22,7 @@ type FormVariant = {
   stock: string;
   extra_price: string;
   sku: string;
-  image_url: string;
+  image_url: string; // URL foto asli yang dipilih dari Foto Produk
 };
 
 type FormImage = {
@@ -32,16 +32,73 @@ type FormImage = {
   cutout_url: string; // PNG transparan hasil remove background, "" kalau belum ada
 };
 
+const fieldClass = "block space-y-1.5 text-[12px] font-medium text-[#4A443E]";
+
 const inputClass =
-  "w-full h-10 px-3 rounded-lg border border-[#d5d5d5] text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#303030]";
+  "w-full h-11 rounded-xl border border-[#E7E5E0] bg-white px-3.5 text-[13px] text-[#1E1C18] placeholder:text-[#B0A89D] transition focus:border-[#8B6B5A] focus:outline-none focus:ring-1 focus:ring-[#8B6B5A]";
+
+const inputClassSm =
+  "w-full h-10 rounded-xl border border-[#E7E5E0] bg-white px-3 text-[13px] text-[#1E1C18] placeholder:text-[#B0A89D] transition focus:border-[#8B6B5A] focus:outline-none focus:ring-1 focus:ring-[#8B6B5A]";
+
+const textareaClass =
+  "w-full resize-y rounded-xl border border-[#E7E5E0] bg-white px-3.5 py-3 text-[13px] text-[#1E1C18] placeholder:text-[#B0A89D] transition focus:border-[#8B6B5A] focus:outline-none focus:ring-1 focus:ring-[#8B6B5A]";
+
+const secondaryButtonClass =
+  "inline-flex h-9 items-center gap-1.5 rounded-full border border-[#E7E5E0] bg-white px-3.5 text-[12px] font-medium text-[#5F5953] transition hover:border-[#8B6B5A] hover:text-[#1E1C18]";
+
+function SectionHeading({
+  kicker,
+  title,
+  description,
+  badge,
+  action,
+}: {
+  kicker: string;
+  title: string;
+  description: string;
+  badge?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#EFEAE4] px-5 py-5 sm:px-7">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9A7B69]">
+          {kicker}
+        </p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <h2 className="font-serif text-[22px] leading-none tracking-[-0.03em] text-[#1E1C18]">
+            {title}
+          </h2>
+          {badge && (
+            <span className="rounded-full bg-[#F7F3EE] px-2 py-0.5 text-[11px] font-medium text-[#8B6B5A]">
+              {badge}
+            </span>
+          )}
+        </div>
+        <p className="mt-2 max-w-xl text-[12px] leading-5 text-[#8A837B]">
+          {description}
+        </p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// Latar catur menandakan foto sudah punya versi transparan.
+const checkerboardStyle = {
+  backgroundImage:
+    "linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%)",
+  backgroundSize: "8px 8px",
+  backgroundPosition: "0 0, 0 4px, 4px -4px, -4px 0px",
+};
 
 function emptyVariant(): FormVariant {
   return {
     key: crypto.randomUUID(),
     size: "",
     color: "",
-    stock: "0",
-    extra_price: "0",
+    stock: "",
+    extra_price: "",
     sku: "",
     image_url: "",
   };
@@ -89,7 +146,6 @@ export default function ProductForm({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Key foto yang sedang diproses "Hapus Background" satu per satu
-  // (dipakai untuk retrofit foto lama / URL manual)
   const [memprosesKeys, setMemprosesKeys] = useState<Set<string>>(new Set());
   const [bgError, setBgError] = useState<Record<string, string>>({});
 
@@ -98,7 +154,9 @@ export default function ProductForm({
   // saat produk yang sudah ada disimpan ulang.
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
-  const [brand, setBrand] = useState(product?.brand ?? "");
+  // Merek tidak ditampilkan di form, tapi nilai lama tetap dipertahankan
+  // saat produk yang sudah ada disimpan ulang.
+  const brand = product?.brand ?? "";
   const [gender, setGender] = useState(product?.gender ?? "");
   const [material, setMaterial] = useState(product?.material ?? "");
   const [categoryId, setCategoryId] = useState(
@@ -119,7 +177,7 @@ export default function ProductForm({
           sku: v.sku ?? "",
           image_url: v.image_url ?? "",
         }))
-      : [emptyVariant()],
+      : [],
   );
   const [images, setImages] = useState<FormImage[]>(
     product?.images.length
@@ -129,7 +187,7 @@ export default function ProductForm({
           url: img.url,
           cutout_url: img.cutout_url ?? "",
         }))
-      : [emptyImage()],
+      : [],
   );
 
   function updateVariant(key: string, field: keyof FormVariant, value: string) {
@@ -142,6 +200,7 @@ export default function ProductForm({
   const ukuranDipilih = new Set(
     variants.map((v) => v.size.trim().toUpperCase()).filter(Boolean),
   );
+  const daftarFoto = images.filter((i) => i.url);
 
   // Centang = tambah baris varian untuk ukuran itu; hapus centang = buang barisnya.
   function toggleUkuran(ukuran: string) {
@@ -159,13 +218,44 @@ export default function ProductForm({
           key: crypto.randomUUID(),
           size: ukuran,
           color: contoh?.color ?? "",
-          stock: "0",
-          extra_price: contoh?.extra_price ?? "0",
+          stock: "",
+          extra_price: contoh?.extra_price ?? "",
           sku: "",
-          image_url: "",
+          image_url: contoh?.image_url ?? "",
         },
       ];
     });
+  }
+
+  // Hapus satu foto produk. Varian yang memilih foto itu ikut dilepas
+  // supaya tidak menunjuk ke foto yang sudah tidak ada.
+  function hapusFoto(key: string) {
+    const img = images.find((i) => i.key === key);
+    setImages((prev) => prev.filter((item) => item.key !== key));
+    if (img?.url) {
+      setVariants((prev) =>
+        prev.map((v) =>
+          v.image_url === img.url ? { ...v, image_url: "" } : v,
+        ),
+      );
+    }
+  }
+
+  // Ubah URL foto. Varian yang memilih URL lama ikut diperbarui.
+  function ubahUrlFoto(key: string, urlBaru: string) {
+    const img = images.find((i) => i.key === key);
+    const urlLama = img?.url ?? "";
+
+    setImages((prev) =>
+      prev.map((item) => (item.key === key ? { ...item, url: urlBaru } : item)),
+    );
+    if (urlLama) {
+      setVariants((prev) =>
+        prev.map((v) =>
+          v.image_url === urlLama ? { ...v, image_url: urlBaru } : v,
+        ),
+      );
+    }
   }
 
   // ===== Upload dari komputer: cukup upload foto aslinya. Background
@@ -205,9 +295,10 @@ export default function ProductForm({
     }
   }
 
-  // ===== Retrofit: hapus background dari foto yang sudah ada
-  // (foto lama, atau URL yang ditempel manual). Mengambil gambar
-  // dari URL-nya, jadi perlu bucket/host yang mengizinkan fetch lintas asal. =====
+  // ===== Hapus background dari sebuah foto produk. Hasilnya disimpan di
+  // cutout_url foto itu. Varian TIDAK diubah: varian tetap menyimpan URL
+  // foto aslinya, dan halaman Buat Outfit otomatis mencari versi
+  // transparannya lewat foto produk yang sama. =====
   async function handleHapusBackground(key: string) {
     const img = images.find((i) => i.key === key);
     if (!img || !img.url) return;
@@ -277,12 +368,14 @@ export default function ProductForm({
         sku: v.sku,
         image_url: v.image_url,
       })),
-      images: images.map((img, index) => ({
-        id: img.id,
-        url: img.url,
-        cutout_url: img.cutout_url || null,
-        sort_order: index,
-      })),
+      images: images
+        .filter((img) => img.url.trim())
+        .map((img, index) => ({
+          id: img.id,
+          url: img.url,
+          cutout_url: img.cutout_url || null,
+          sort_order: index,
+        })),
     };
 
     const result = await saveProduct(payload);
@@ -298,21 +391,26 @@ export default function ProductForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
-      <section className="bg-white rounded-xl border border-[#e5e5e5] p-5 space-y-4">
-        <h2 className="text-[14px] font-semibold">Informasi Produk</h2>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <section className="admin-card overflow-hidden">
+        <SectionHeading
+          kicker="Langkah 1"
+          title="Informasi produk"
+          description="Detail dasar yang tampil di halaman produk."
+        />
 
-        <div className="grid md:grid-cols-2 gap-4">
-          <label className="text-[12px] text-[#666] space-y-1">
+        <div className="grid gap-4 px-5 py-6 sm:px-7 md:grid-cols-2">
+          <label className={fieldClass}>
             <span>Nama</span>
             <input
               required
+              placeholder="Nama produk"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={inputClass}
             />
           </label>
-          <label className="text-[12px] text-[#666] space-y-1">
+          <label className={fieldClass}>
             <span>Kategori</span>
             <select
               required
@@ -328,26 +426,24 @@ export default function ProductForm({
               ))}
             </select>
           </label>
-          <label className="text-[12px] text-[#666] space-y-1">
+          <label className={fieldClass}>
             <span>Harga dasar</span>
-            <input
-              required
-              type="number"
-              min="0"
-              value={basePrice}
-              onChange={(e) => setBasePrice(e.target.value)}
-              className={inputClass}
-            />
+            <span className="relative block">
+              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[12px] font-medium text-[#8A837B]">
+                Rp
+              </span>
+              <input
+                required
+                type="number"
+                min="0"
+                placeholder="0"
+                value={basePrice}
+                onChange={(e) => setBasePrice(e.target.value)}
+                className={`${inputClass} pl-10`}
+              />
+            </span>
           </label>
-          <label className="text-[12px] text-[#666] space-y-1">
-            <span>Merek</span>
-            <input
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="text-[12px] text-[#666] space-y-1">
+          <label className={fieldClass}>
             <span>Gender</span>
             <select
               value={gender}
@@ -360,201 +456,213 @@ export default function ProductForm({
               <option value="wanita">Wanita</option>
             </select>
           </label>
-          <label className="text-[12px] text-[#666] space-y-1 md:col-span-2">
+          <label className={`${fieldClass} md:col-span-2`}>
             <span>Bahan</span>
             <input
+              placeholder="Contoh: Katun combed 30s"
               value={material}
               onChange={(e) => setMaterial(e.target.value)}
               className={inputClass}
             />
           </label>
-          <label className="text-[12px] text-[#666] space-y-1 md:col-span-2">
+          <label className={`${fieldClass} md:col-span-2`}>
             <span>Deskripsi</span>
             <textarea
               rows={4}
+              placeholder="Tulis deskripsi singkat produk..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[#d5d5d5] text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#303030]"
+              className={textareaClass}
             />
           </label>
         </div>
       </section>
 
-      <section className="bg-white rounded-xl border border-[#e5e5e5] p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[14px] font-semibold">Foto Produk</h2>
-          <button
-            type="button"
-            onClick={() => setImages((prev) => [...prev, emptyImage()])}
-            className="text-[12px] font-medium text-[#8b6b5a] hover:underline"
-          >
-            + Tambah URL
-          </button>
-        </div>
-
-        {/* ===== UPLOAD DARI KOMPUTER ===== */}
-        <div className="rounded-xl border border-dashed border-[#d5d5d5] bg-[#FAFAF9] p-5">
-          <label className="block cursor-pointer">
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
-              multiple
-              disabled={uploading}
-              onChange={(e) => handleUpload(e.target.files)}
-              className="sr-only"
-            />
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <span className="inline-flex items-center justify-center h-10 px-5 rounded-lg bg-[#1e1c18] text-white text-[13px] font-semibold transition disabled:opacity-60">
-                {uploading ? "Memproses..." : "Upload Gambar"}
+      <section className="admin-card overflow-hidden">
+        <SectionHeading
+          kicker="Langkah 2"
+          title="Foto produk"
+          description="Foto pertama menjadi cover. Urutan galeri mengikuti urutan di bawah."
+          badge={`${daftarFoto.length} foto`}
+          action={
+            <button
+              type="button"
+              onClick={() => setImages((prev) => [...prev, emptyImage()])}
+              className={secondaryButtonClass}
+            >
+              <span aria-hidden="true" className="text-[15px] leading-none">
+                +
               </span>
-              <p className="text-[12px] text-[#888]">
-                Pilih satu atau beberapa gambar dari komputer (JPG, PNG, WebP,
-                AVIF, GIF — maks. 5 MB per file). Background tidak dihapus
-                otomatis — klik &quot;Hapus Background&quot; pada foto di bawah
-                kalau mau.
-              </p>
-            </div>
-          </label>
-          {uploadStatus && (
-            <p className="mt-3 text-[12px] text-[#8b6b5a]">{uploadStatus}</p>
-          )}
-          {uploadError && (
-            <p className="mt-3 text-[12px] text-[#B23B3B]">{uploadError}</p>
-          )}
-        </div>
+              Tambah URL
+            </button>
+          }
+        />
 
-        <p className="text-[12px] text-[#888]">
-          Gambar hasil upload atau URL. Urutan dari atas ke bawah menjadi urutan
-          galeri. Foto berlatar catur (▦) menandakan sudah punya versi tanpa
-          background, dipakai di halaman Buat Outfit.
-        </p>
-        <div className="space-y-2">
-          {images.map((img, index) => {
-            const sedangDiproses = memprosesKeys.has(img.key);
-            return (
-              <div
-                key={img.key}
-                className="rounded-lg border border-[#eee] p-2"
-              >
-                <div className="flex gap-2 items-center">
-                  {img.url && (
-                    <div
-                      className="w-10 h-10 rounded-lg border border-[#eee] shrink-0 overflow-hidden"
-                      style={
-                        img.cutout_url
-                          ? {
-                              backgroundImage:
-                                "linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%)",
-                              backgroundSize: "8px 8px",
-                              backgroundPosition:
-                                "0 0, 0 4px, 4px -4px, -4px 0px",
-                            }
-                          : undefined
-                      }
-                    >
-                      <img
-                        src={img.cutout_url || img.url}
-                        alt={`Pratinjau ${index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-                  <input
-                    value={img.url}
-                    onChange={(e) =>
-                      setImages((prev) =>
-                        prev.map((item) =>
-                          item.key === img.key
-                            ? { ...item, url: e.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                    placeholder={`URL foto ${index + 1}`}
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setImages((prev) =>
-                        prev.filter((item) => item.key !== img.key),
-                      )
-                    }
-                    className="px-3 text-[12px] text-[#B23B3B] shrink-0"
-                  >
-                    Hapus
-                  </button>
-                </div>
+        <div className="space-y-4 px-5 py-6 sm:px-7">
+        {/* ===== UPLOAD DARI KOMPUTER ===== */}
+        <label className="group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[#DED7CE] bg-[#FBF9F6] px-5 py-8 text-center transition hover:border-[#8B6B5A] hover:bg-[#F8F5F0]">
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
+            multiple
+            disabled={uploading}
+            onChange={(e) => handleUpload(e.target.files)}
+            className="sr-only"
+          />
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-[#1E1C18] text-lg text-white transition group-hover:bg-[#8B6B5A]">
+            ↑
+          </span>
+          <span className="space-y-1">
+            <span className="block text-[13px] font-semibold text-[#1E1C18]">
+              {uploading ? "Mengupload gambar..." : "Upload foto dari komputer"}
+            </span>
+            <span className="block text-[11px] leading-5 text-[#8A8179]">
+              Pilih satu atau beberapa gambar (JPG, PNG, WebP, AVIF, GIF — maks.
+              5 MB per file). Urutan galeri mengikuti urutan foto di bawah.
+            </span>
+          </span>
+        </label>
 
-                {img.url && (
-                  <div className="mt-2 flex items-center gap-2 pl-12">
-                    {img.cutout_url ? (
-                      <span className="text-[11px] text-[#3a7d44]">
-                        ✓ Background sudah dihapus
-                      </span>
+        {uploadStatus && (
+          <p className="text-[12px] text-[#8B6B5A]">{uploadStatus}</p>
+        )}
+        {uploadError && (
+          <p className="text-[12px] text-[#B23B3B]">{uploadError}</p>
+        )}
+
+        {images.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {images.map((img, index) => {
+              const sedangDiproses = memprosesKeys.has(img.key);
+              const punyaFoto = Boolean(img.url);
+
+              return (
+                <div
+                  key={img.key}
+                  className="overflow-hidden rounded-xl border border-[#EBE7E1] bg-white"
+                >
+                  <div className="relative aspect-[4/3] overflow-hidden bg-[#F7F5F2]">
+                    {punyaFoto ? (
+                      <div
+                        className="h-full w-full"
+                        style={img.cutout_url ? checkerboardStyle : undefined}
+                      >
+                        <img
+                          src={img.cutout_url || img.url}
+                          alt={`Pratinjau ${index + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
                     ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[11px] text-[#aaa]">
+                        Belum ada pratinjau
+                      </div>
+                    )}
+                    <span className="absolute left-2 top-2 rounded-full bg-[#1E1C18]/85 px-2 py-0.5 text-[10px] font-semibold text-white">
+                      #{index + 1}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 p-3">
+                    <input
+                      value={img.url}
+                      onChange={(e) => ubahUrlFoto(img.key, e.target.value)}
+                      placeholder={`URL foto ${index + 1}`}
+                      className={inputClassSm}
+                    />
+
+                    <div className="flex items-center justify-between gap-2">
+                      {!punyaFoto ? (
+                        <span className="text-[11px] text-[#aaa]">
+                          Isi URL atau upload foto
+                        </span>
+                      ) : img.cutout_url ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#3a7d44]">
+                          ✓ Tanpa background
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={sedangDiproses}
+                          onClick={() => handleHapusBackground(img.key)}
+                          className="h-8 rounded-lg border border-[#e3ddd5] px-3 text-[11px] font-medium text-[#8b6b5a] transition hover:border-[#1e1c18] hover:text-[#1e1c18] disabled:opacity-50"
+                        >
+                          {sedangDiproses ? "Memproses..." : "Hapus Background"}
+                        </button>
+                      )}
+
                       <button
                         type="button"
-                        disabled={sedangDiproses}
-                        onClick={() => handleHapusBackground(img.key)}
-                        className="text-[11px] font-medium text-[#8b6b5a] hover:underline disabled:opacity-50"
+                        onClick={() => hapusFoto(img.key)}
+                        aria-label={`Hapus foto ${index + 1}`}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[#eee] text-[15px] leading-none text-[#B23B3B] transition hover:border-[#B23B3B] hover:bg-[#FDF3F3]"
                       >
-                        {sedangDiproses ? "Memproses..." : "Hapus Background"}
+                        ×
                       </button>
-                    )}
+                    </div>
+
                     {bgError[img.key] && (
-                      <span className="text-[11px] text-[#B23B3B]">
+                      <p className="text-[11px] leading-4 text-[#B23B3B]">
                         {bgError[img.key]}
-                      </span>
+                      </p>
                     )}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {daftarFoto.length > 0 && (
+          <p className="rounded-xl bg-[#F7F3EE] px-3.5 py-2.5 text-[11px] leading-5 text-[#8A837B]">
+            Foto berlatar catur sudah punya versi tanpa background yang dipakai
+            di halaman Buat Outfit.
+          </p>
+        )}
         </div>
       </section>
 
-      <section className="bg-white rounded-xl border border-[#e5e5e5] p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[14px] font-semibold">
-            Varian (ukuran, warna, stok)
-          </h2>
-          <button
-            type="button"
-            onClick={() => setVariants((prev) => [...prev, emptyVariant()])}
-            className="text-[12px] font-medium text-[#8b6b5a] hover:underline"
-          >
-            + Tambah Varian
-          </button>
-        </div>
+      <section className="admin-card overflow-hidden">
+        <SectionHeading
+          kicker="Langkah 3"
+          title="Varian"
+          description="Atur ukuran, warna, stok, dan foto tiap varian."
+          badge={`${variants.length} varian`}
+          action={
+            <button
+              type="button"
+              onClick={() => setVariants((prev) => [...prev, emptyVariant()])}
+              className={secondaryButtonClass}
+            >
+              <span aria-hidden="true" className="text-[15px] leading-none">
+                +
+              </span>
+              Tambah Varian
+            </button>
+          }
+        />
 
+        <div className="space-y-4 px-5 py-6 sm:px-7">
         {/* CHECKLIST UKURAN */}
-        <div>
-          <p className="text-[12px] text-[#666] mb-2">
-            Ukuran tersedia{" "}
-            <span className="text-[#999]">
-              (centang ukuran yang dijual — varian dibuat otomatis)
-            </span>
-          </p>
-          <div className="grid grid-cols-5 gap-1.5 max-w-md">
+        <div className="rounded-xl border border-[#EFEDE8] bg-[#FBF9F6] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[12px] font-medium text-[#4A443E]">
+              Ukuran tersedia
+            </p>
+            <p className="text-[11px] text-[#8A8179]">
+              Centang untuk membuat varian otomatis
+            </p>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
             {UKURAN_LIST.map((ukuran) => (
-              <label key={ukuran} className="cursor-pointer">
+              <label key={ukuran} className="relative cursor-pointer">
                 <input
                   type="checkbox"
                   checked={ukuranDipilih.has(ukuran)}
                   onChange={() => toggleUkuran(ukuran)}
                   className="sr-only peer"
                 />
-
-                <span
-                  className="
-                    h-9 flex items-center justify-center rounded-md
-                    border border-[#d5d5d5] bg-white text-[12px] text-[#5F5953]
-                    transition peer-checked:bg-[#1e1c18] peer-checked:border-[#1e1c18]
-                    peer-checked:text-white hover:border-[#1e1c18]
-                  "
-                >
+                <span className="flex h-8 min-w-11 items-center justify-center rounded-full border border-[#E4DFD8] bg-white px-3 text-[12px] text-[#5F5953] transition peer-checked:border-[#1E1C18] peer-checked:bg-[#1E1C18] peer-checked:text-white hover:border-[#8B6B5A]">
                   {ukuran}
                 </span>
               </label>
@@ -562,99 +670,186 @@ export default function ProductForm({
           </div>
         </div>
 
-        <div className="space-y-4">
-          {variants.map((variant) => (
-            <div
-              key={variant.key}
-              className="grid md:grid-cols-5 gap-2 rounded-lg border border-[#eee] p-3"
-            >
-              <select
-                value={variant.size}
-                onChange={(e) =>
-                  updateVariant(variant.key, "size", e.target.value)
-                }
-                className={inputClass}
+        {variants.length === 0 ? (
+          <div className="rounded-xl border border-[#EFEDE8] bg-[#FBF9F6] px-5 py-8 text-center">
+            <p className="text-[13px] font-medium text-[#1E1C18]">
+              Belum ada varian
+            </p>
+            <p className="mt-1 text-[11px] text-[#8A837B]">
+              Pilih ukuran di atas atau tekan Tambah Varian.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {variants.map((variant, index) => (
+              <div
+                key={variant.key}
+                className="rounded-2xl border border-[#EFEAE4] bg-white p-4"
               >
-                <option value="">Ukuran</option>
-                {UKURAN_LIST.map((ukuran) => (
-                  <option key={ukuran} value={ukuran}>
-                    {ukuran}
-                  </option>
-                ))}
-                {variant.size &&
-                  !UKURAN_LIST.some((ukuran) => ukuran === variant.size) && (
-                    <option value={variant.size}>{variant.size}</option>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-[12px] font-medium text-[#4A443E]">
+                    Varian {index + 1}
+                    {variant.size ? (
+                      <span className="ml-2 rounded-full bg-[#F7F3EE] px-2 py-0.5 text-[11px] text-[#8B6B5A]">
+                        {variant.size}
+                      </span>
+                    ) : null}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setVariants((prev) =>
+                        prev.filter((v) => v.key !== variant.key),
+                      )
+                    }
+                    aria-label={`Hapus varian ${index + 1}`}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-[#EEE] text-[15px] leading-none text-[#B23B3B] transition hover:border-[#B23B3B] hover:bg-[#FDF3F3]"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
+                  <label className={fieldClass}>
+                    <span>Ukuran</span>
+                    <select
+                      value={variant.size}
+                      onChange={(e) =>
+                        updateVariant(variant.key, "size", e.target.value)
+                      }
+                      className={`${inputClassSm} ${
+                        variant.size ? "" : "text-[#B0A89D]"
+                      }`}
+                    >
+                      <option value="">Pilih ukuran</option>
+                      {UKURAN_LIST.map((ukuran) => (
+                        <option key={ukuran} value={ukuran}>
+                          {ukuran}
+                        </option>
+                      ))}
+                      {variant.size &&
+                        !UKURAN_LIST.some(
+                          (ukuran) => ukuran === variant.size,
+                        ) && <option value={variant.size}>{variant.size}</option>}
+                    </select>
+                  </label>
+                  <label className={fieldClass}>
+                    <span>Warna</span>
+                    <input
+                      placeholder="Contoh: Hitam"
+                      value={variant.color}
+                      onChange={(e) =>
+                        updateVariant(variant.key, "color", e.target.value)
+                      }
+                      className={inputClassSm}
+                    />
+                  </label>
+                  <label className={fieldClass}>
+                    <span>Stok</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={variant.stock}
+                      onChange={(e) =>
+                        updateVariant(variant.key, "stock", e.target.value)
+                      }
+                      className={inputClassSm}
+                    />
+                  </label>
+                  <label className={fieldClass}>
+                    <span>Tambahan harga</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={variant.extra_price}
+                      onChange={(e) =>
+                        updateVariant(variant.key, "extra_price", e.target.value)
+                      }
+                      className={inputClassSm}
+                    />
+                  </label>
+                </div>
+
+                {/* ===== FOTO VARIAN: dipilih dari Foto Produk ===== */}
+                <div className="mt-4 border-t border-[#F3F1EC] pt-3">
+                  <p className="mb-2 text-[12px] font-medium text-[#4A443E]">
+                    Foto varian
+                  </p>
+                  {daftarFoto.length === 0 ? (
+                    <p className="text-[11px] text-[#8A837B]">
+                      Tambahkan foto di bagian Foto produk dulu.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {daftarFoto.map((img, idx) => {
+                        const dipilih = variant.image_url === img.url;
+
+                        return (
+                          <button
+                            key={img.key}
+                            type="button"
+                            onClick={() =>
+                              updateVariant(
+                                variant.key,
+                                "image_url",
+                                dipilih ? "" : img.url,
+                              )
+                            }
+                            aria-label={`Pilih foto ${idx + 1} untuk varian ${index + 1}`}
+                            aria-pressed={dipilih}
+                            className={`relative h-14 w-14 overflow-hidden rounded-xl border-2 transition ${
+                              dipilih
+                                ? "border-[#1E1C18]"
+                                : "border-[#EEE] hover:border-[#8B6B5A]"
+                            }`}
+                          >
+                            <img
+                              src={img.cutout_url || img.url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                            {dipilih && (
+                              <span className="absolute bottom-0 right-0 grid h-4 w-4 place-items-center rounded-tl-md bg-[#1E1C18] text-[10px] font-semibold text-white">
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
-              </select>
-              <input
-                placeholder="Warna"
-                value={variant.color}
-                onChange={(e) =>
-                  updateVariant(variant.key, "color", e.target.value)
-                }
-                className={inputClass}
-              />
-              <input
-                type="number"
-                min="0"
-                placeholder="Stok"
-                value={variant.stock}
-                onChange={(e) =>
-                  updateVariant(variant.key, "stock", e.target.value)
-                }
-                className={inputClass}
-              />
-              <input
-                type="number"
-                min="0"
-                placeholder="Tambahan harga"
-                value={variant.extra_price}
-                onChange={(e) =>
-                  updateVariant(variant.key, "extra_price", e.target.value)
-                }
-                className={inputClass}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setVariants((prev) =>
-                    prev.filter((v) => v.key !== variant.key),
-                  )
-                }
-                className="text-[12px] text-[#B23B3B]"
-              >
-                Hapus
-              </button>
-              <input
-                placeholder="URL gambar varian"
-                value={variant.image_url}
-                onChange={(e) =>
-                  updateVariant(variant.key, "image_url", e.target.value)
-                }
-                className={`${inputClass} md:col-span-6`}
-              />
-            </div>
-          ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         </div>
       </section>
 
-      {error && <p className="text-[13px] text-[#B23B3B]">{error}</p>}
+      {error && (
+        <p className="rounded-xl border border-[#F2D9D9] bg-[#FDF5F5] px-4 py-3 text-[12px] text-[#B23B3B]">
+          {error}
+        </p>
+      )}
 
-      <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="h-10 px-5 rounded-lg bg-[#303030] hover:bg-[#8b6b5a] text-white text-[13px] font-semibold transition disabled:opacity-60"
-        >
-          {isPending ? "Menyimpan..." : "Simpan Produk"}
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push("/admin/products")}
-          className="h-10 px-5 rounded-lg border border-[#d5d5d5] text-[13px]"
-        >
-          Batal
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-black/5 bg-white p-3">
+        <p className="px-2 text-[12px] text-[#8A837B]">
+          Pastikan foto dan varian sudah sesuai sebelum disimpan.
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => router.push("/admin/products")}
+            className="inline-flex h-10 items-center rounded-full border border-[#E7E5E0] px-4 text-[13px] font-medium text-[#5F5953] transition hover:border-[#8B6B5A] hover:text-[#1E1C18]"
+          >
+            Batal
+          </button>
+          <button type="submit" disabled={isPending} className="admin-btn disabled:cursor-not-allowed disabled:opacity-60">
+            {isPending ? "Menyimpan..." : "Simpan Produk"}
+          </button>
+        </div>
       </div>
     </form>
   );

@@ -70,11 +70,6 @@ export default function CartClient({ items }: { items: ItemKeranjang[] }) {
     () => new Set(items.map((i) => i.id)),
   );
 
-  // Jumlah yang mau di-checkout per item (default: semua qty di keranjang).
-  const [qtyCheckout, setQtyCheckout] = useState<Record<number, number>>(() =>
-    Object.fromEntries(items.map((i) => [i.id, i.quantity])),
-  );
-
   const toggle = (id: number) =>
     setTerpilih((prev) => {
       const next = new Set(prev);
@@ -88,16 +83,10 @@ export default function CartClient({ items }: { items: ItemKeranjang[] }) {
   const toggleSemua = () =>
     setTerpilih(semuaTerpilih ? new Set() : new Set(items.map((i) => i.id)));
 
-  const setQty = (id: number, q: number) =>
-    setQtyCheckout((prev) => ({ ...prev, [id]: Math.max(1, q) }));
-
   // Kombinasi pilihan: item + qty efektif
   const selection = items.map((item) => {
     const selected = terpilih.has(item.id);
-    const qty = selected
-      ? Math.min(qtyCheckout[item.id] ?? item.quantity, item.quantity)
-      : 0;
-    return { item, selected, qty };
+    return { item, selected, qty: selected ? item.quantity : 0 };
   });
 
   const itemTerpilih = selection.filter((s) => s.selected);
@@ -143,11 +132,6 @@ export default function CartClient({ items }: { items: ItemKeranjang[] }) {
               {...item}
               selected={terpilih.has(item.id)}
               onToggleSelected={() => toggle(item.id)}
-              qtyCheckout={Math.min(
-                qtyCheckout[item.id] ?? item.quantity,
-                item.quantity,
-              )}
-              onQtyCheckoutChange={(q) => setQty(item.id, q)}
             />
           ))}
         </div>

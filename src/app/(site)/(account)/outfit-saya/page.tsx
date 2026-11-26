@@ -65,7 +65,11 @@ export default async function OutfitSayaPage() {
         </Link>
       </div>
 
-      {daftarOutfit.length === 0 ? (
+      <div
+        className="overflow-y-auto pr-1 inner-scroll"
+        style={{ height: "min(680px, calc(100dvh - 220px))" }}
+      >
+        {daftarOutfit.length === 0 ? (
         <div className="rounded-[24px] border border-black/5 bg-white py-20 text-center">
           <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#EBEBEB] text-[#8B6B5A]">
             <svg
@@ -146,7 +150,8 @@ export default async function OutfitSayaPage() {
             })}
           </div>
         </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

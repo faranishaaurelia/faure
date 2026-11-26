@@ -64,7 +64,7 @@ export default async function AdminOrderDetailPage({
     ? order.addresses[0]
     : order.addresses;
 
-  const statusOptions = TAB_STATUS.filter((s) => s.key !== "semua" && s.key !== "dibatalkan");
+  const statusOptions = TAB_STATUS.filter((s) => s.key !== "semua");
 
   const indeksTahap = status.key ? TAHAP.indexOf(status.key) : -1;
 
@@ -261,11 +261,17 @@ export default async function AdminOrderDetailPage({
         <div className="space-y-4">
           <div className="admin-card p-6">
             <h2 className="font-serif text-lg mb-3">Update Status</h2>
-            <UpdateStatusForm
-              orderId={order.id}
-              currentStatus={order.status}
-              options={statusOptions}
-            />
+            {status.key === "dibatalkan" ? (
+              <p className="text-[13px] text-[#8A2530]">
+                Pesanan ini sudah dibatalkan dan statusnya tidak dapat diubah lagi.
+              </p>
+            ) : (
+              <UpdateStatusForm
+                orderId={order.id}
+                currentStatus={order.status}
+                options={statusOptions}
+              />
+            )}
           </div>
 
           <div className="admin-card p-6">

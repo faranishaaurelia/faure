@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getAdminClient, slugify } from "@/lib/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { statusDbValue, infoStatus } from "@/lib/orders";
+import { restoreOrderStock } from "@/lib/stock";
 
 export type VariantInput = {
   id?: number;
@@ -44,6 +45,8 @@ function revalidateStore() {
   revalidatePath("/admin/users");
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
+  revalidatePath("/outfit");
+  revalidatePath("/outfit/buat");
 }
 
 export async function updateOrderStatus(orderId: number, newStatus: string) {
@@ -69,38 +72,58 @@ export async function updateOrderStatus(orderId: number, newStatus: string) {
     return { error: "Status pesanan tidak valid." };
   }
 
+  const prevStatusKey = infoStatus(order.status).key;
+  if (prevStatusKey === "dibatalkan") {
+    return { error: "Pesanan yang sudah dibatalkan tidak dapat diubah statusnya." };
+  }
+
   const updatedAt = new Date().toISOString();
   const payload: Record<string, string | null> = {
     status: statusDb,
     updated_at: updatedAt,
   };
 
+  const admin = createAdminClient();
+  let affectedProductIds: number[] = [];
+
   // Kalau admin membatalkan pesanan, catat waktu & siapa yang membatalkan
-  // (kolom cancelled_by bertipe uuid → simpan ID admin). Alasan pembatalan
-  // tidak ditimpa (bisa jadi sudah diisi user).
-  if (statusDb === "dibatalkan" && infoStatus(order.status).key !== "dibatalkan") {
+  // (kolom cancelled_by bertipe uuid → simpan ID admin).
+  if (statusDb === "dibatalkan") {
     payload.cancelled_at = updatedAt;
     const {
       data: { user: adminUser },
     } = await supabase.auth.getUser();
     payload.cancelled_by = adminUser?.id ?? null;
+    if (!order.cancellation_reason) {
+      payload.cancellation_reason = "Dibatalkan oleh admin";
+    }
   }
 
-  const { error } = await supabase
+  // Pulihkan stok HANYA kalau status benar-benar berubah ke dibatalkan.
+  // Update bersyarat mencegah pemulihan ganda saat ada pembatalan paralel.
+  const { data: updated, error } = await supabase
     .from("orders")
     .update(payload)
-    .eq("id", orderId);
+    .eq("id", orderId)
+    .neq("status", "dibatalkan")
+    .select("id");
 
   if (error) {
     return { error: error.message };
+  }
+
+  if (!updated || updated.length === 0) {
+    return { error: "Pesanan ini sudah dibatalkan." };
+  }
+
+  if (statusDb === "dibatalkan") {
+    affectedProductIds = await restoreOrderStock(orderId, admin);
   }
 
   if (statusDb === "selesai") {
     // Tulis item lemari pakai service-role client: RLS memblokir INSERT
     // closet_items dari sesi user (termasuk admin), jadi error-nya dulu
     // hilang diam-diam dan item tidak pernah masuk lemari.
-    const admin = createAdminClient();
-
     const { data: items } = await admin
       .from("order_items")
       .select("id, product_variant_id")
@@ -137,8 +160,15 @@ export async function updateOrderStatus(orderId: number, newStatus: string) {
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
+  revalidatePath("/admin/products");
   revalidatePath("/pesanan");
+  revalidatePath(`/pesanan/${orderId}`);
   revalidatePath("/lemari");
+  revalidatePath("/produk");
+  revalidatePath("/produk/[id]", "page");
+  for (const pid of affectedProductIds) {
+    revalidatePath(`/produk/${pid}`);
+  }
 
   return { error: null };
 }
@@ -443,6 +473,51 @@ export async function deleteReview(id: number) {
   revalidatePath("/admin/reviews");
   revalidatePath("/admin/dashboard");
   revalidatePath("/produk");
+  return { error: null };
+}
+
+export async function deleteUser(userId: string) {
+  const auth = await getAdminClient();
+  if (auth.error || !auth.supabase) return { error: auth.error };
+
+  if (typeof userId !== "string" || !/^[0-9a-f-]{36}$/i.test(userId)) {
+    return { error: "ID pengguna tidak valid." };
+  }
+
+  const {
+    data: { user: adminUser },
+  } = await auth.supabase.auth.getUser();
+
+  if (adminUser?.id === userId) {
+    return { error: "Tidak bisa menghapus akun sendiri." };
+  }
+
+  const { data: target } = await auth.supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!target) return { error: "Pengguna tidak ditemukan." };
+
+  if (String(target.role ?? "").toLowerCase() === "admin") {
+    return { error: "Akun admin tidak bisa dihapus." };
+  }
+
+  // Hapus dari Auth (service role) agar profil & data terkait ikut terhapus
+  // lewat aturan cascade di database, bukan cuma baris profiles-nya.
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
+
+  if (error) {
+    return {
+      error:
+        "Pengguna tidak bisa dihapus. Pastikan tidak ada data terkait (pesanan, alamat, atau outfit) yang masih memakai akun ini.",
+    };
+  }
+
+  revalidateStore();
+  revalidatePath("/admin/chat");
   return { error: null };
 }
 

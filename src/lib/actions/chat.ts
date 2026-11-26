@@ -162,11 +162,26 @@ export async function markChatRead(
 
   if (!user) return { error: null };
 
-  await supabase
+  const { data: diupdate, error: errUpdate } = await supabase
     .from("messages")
     .update({ is_read: true })
     .eq("conversation_id", conversationId)
-    .neq("sender_id", user.id);
+    .eq("is_read", false)
+    .neq("sender_id", user.id)
+    .select("id");
+
+  console.log(
+    "[markChatRead] conv:",
+    conversationId,
+    "| user:",
+    user.id,
+    "| baris diupdate:",
+    diupdate?.length ?? 0,
+    "| error:",
+    errUpdate?.message ?? null,
+  );
+
+  if (errUpdate) return { error: errUpdate.message };
 
   try {
     revalidatePath("/admin", "layout");

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Form from "next/form";
 import { createClient } from "@/lib/supabase/server";
 import {
   TAB_STATUS,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/orders";
 import StatusBadge from "@/components/orders/StatusBadge";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import SortSelect from "@/components/admin/SortSelect";
 
 const styleSvg = {
   width: 18,
@@ -68,12 +70,79 @@ const jumlahProduk = (item: OrderRow["order_items"]) =>
 
 const PER_HALAMAN = 10;
 
+const POLA_TANGGAL = /^\d{4}-\d{2}-\d{2}$/;
+
+const formatterTanggal = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Jakarta",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+// Tanggal pesanan ditampilkan dalam WIB, jadi filter juga memakai tanggal WIB
+// (bukan tanggal UTC) supaya hasilnya sama dengan yang dilihat admin.
+function tanggalWib(iso: string) {
+  const waktu = new Date(iso);
+  if (Number.isNaN(waktu.getTime())) return "";
+
+  const bagian = Object.fromEntries(
+    formatterTanggal
+      .formatToParts(waktu)
+      .filter((p) => p.type !== "literal")
+      .map((p) => [p.type, p.value]),
+  );
+
+  return `${bagian.year}-${bagian.month}-${bagian.day}`;
+}
+
+function tanggalValid(nilai: string | undefined) {
+  if (!nilai || !POLA_TANGGAL.test(nilai)) return null;
+
+  const uji = new Date(`${nilai}T00:00:00.000Z`);
+  return !Number.isNaN(uji.getTime()) && uji.toISOString().slice(0, 10) === nilai
+    ? nilai
+    : null;
+}
+
+function paramTunggal(nilai: string | string[] | undefined) {
+  return Array.isArray(nilai) ? nilai[0] : nilai;
+}
+
+const SORT_PESANAN = [
+  { value: "terbaru", label: "Terbaru" },
+  { value: "terlama", label: "Terlama" },
+  { value: "total-tinggi", label: "Total tertinggi" },
+  { value: "total-rendah", label: "Total terendah" },
+  { value: "pelanggan-az", label: "Pelanggan A–Z" },
+];
+
+type SortPesanan = (typeof SORT_PESANAN)[number]["value"];
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{
+    status?: string | string[];
+    page?: string | string[];
+    sort?: string | string[];
+    dari?: string | string[];
+    sampai?: string | string[];
+  }>;
 }) {
-  const { status, page: pageParam } = await searchParams;
+  const params = await searchParams;
+  const status = paramTunggal(params.status);
+  const pageParam = paramTunggal(params.page);
+  const sortParam = paramTunggal(params.sort);
+  const dariMentah = paramTunggal(params.dari);
+  const sampaiMentah = paramTunggal(params.sampai);
+  const dari = tanggalValid(dariMentah);
+  const sampai = tanggalValid(sampaiMentah);
+  const tanggalTidakValid = Boolean(
+    (dariMentah && !dari) || (sampaiMentah && !sampai),
+  );
+  const rentangTerbalik = Boolean(dari && sampai && dari > sampai);
+  const adaFilterTanggal = Boolean(dari || sampai);
+
   const supabase = await createClient();
 
   const { data } = await supabase
@@ -83,7 +152,11 @@ export default async function AdminOrdersPage({
     )
     .order("created_at", { ascending: false });
 
-  const orders = (data ?? []) as unknown as OrderRow[];
+  const semuaOrders = (data ?? []) as unknown as OrderRow[];
+  const orders = semuaOrders.filter((o) => {
+    const tanggal = tanggalWib(o.created_at);
+    return (!dari || tanggal >= dari) && (!sampai || tanggal <= sampai);
+  });
 
   // Nama pelanggan (orders & profiles tidak punya FK langsung)
   const userIds = [...new Set(orders.map((o) => o.user_id))];
@@ -113,17 +186,64 @@ export default async function AdminOrdersPage({
       ? orders
       : orders.filter((o) => infoStatus(o.status).key === tabAktif);
 
+  // ---------- Urutan ----------
+  const sort: SortPesanan = SORT_PESANAN.some((s) => s.value === sortParam)
+    ? (sortParam as SortPesanan)
+    : "terbaru";
+
+  const namaPelanggan = (o: OrderRow) => namaMap.get(o.user_id) ?? "";
+
+  const pesananTerurut = [...semuaTampil].sort((a, b) => {
+    switch (sort) {
+      case "terlama":
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      case "total-tinggi":
+        return Number(b.total) - Number(a.total);
+      case "total-rendah":
+        return Number(a.total) - Number(b.total);
+      case "pelanggan-az":
+        return namaPelanggan(a).localeCompare(namaPelanggan(b), "id");
+      default:
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    }
+  });
+
   // ---------- Pagination ----------
   const halamanSekarang = Math.max(1, parseInt(pageParam ?? "1", 10));
-  const totalHalaman = Math.ceil(semuaTampil.length / PER_HALAMAN);
+  const totalHalaman = Math.ceil(pesananTerurut.length / PER_HALAMAN);
   const halamanValid = Math.min(halamanSekarang, Math.max(1, totalHalaman));
   const mulai = (halamanValid - 1) * PER_HALAMAN;
-  const pesananTampil = semuaTampil.slice(mulai, mulai + PER_HALAMAN);
+  const pesananTampil = pesananTerurut.slice(mulai, mulai + PER_HALAMAN);
 
-  function hrefHalaman(h: number) {
+  function paramsFilter() {
     const params = new URLSearchParams();
     if (tabAktif !== "semua") params.set("status", tabAktif);
+    if (sort !== "terbaru") params.set("sort", sort);
+    if (dari) params.set("dari", dari);
+    if (sampai) params.set("sampai", sampai);
+    return params;
+  }
+
+  function hrefTanpaTanggal() {
+    const qs = paramsFilter().toString();
+    return `/admin/orders${qs ? `?${qs}` : ""}`;
+  }
+
+  function hrefHalaman(h: number) {
+    const params = paramsFilter();
     if (h > 1) params.set("page", String(h));
+    const qs = params.toString();
+    return `/admin/orders${qs ? `?${qs}` : ""}`;
+  }
+
+  function hrefStatus(key: string) {
+    const params = paramsFilter();
+    if (key === "semua") params.delete("status");
+    else params.set("status", key);
     const qs = params.toString();
     return `/admin/orders${qs ? `?${qs}` : ""}`;
   }
@@ -146,7 +266,7 @@ export default async function AdminOrdersPage({
     {
       label: "Total Pesanan",
       value: String(orders.length),
-      hint: "Semua transaksi",
+      hint: adaFilterTanggal ? "Sesuai rentang tanggal" : "Semua transaksi",
       icon: IKON.pesanan,
     },
     {
@@ -199,46 +319,126 @@ export default async function AdminOrdersPage({
         ))}
       </div>
 
-      {/* ===== Filter status ===== */}
-      <nav
-        aria-label="Filter status pesanan"
-        className="flex gap-2 overflow-x-auto pb-1 mb-5"
-      >
-        {TAB_STATUS.map((tab) => {
-          const aktif = tabAktif === tab.key;
-          const jumlah = hitung[tab.key] ?? 0;
+      {/* ===== Filter status & urutan ===== */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-3">
+        <nav
+          aria-label="Filter status pesanan"
+          className="flex gap-2 overflow-x-auto pb-1 sm:flex-1"
+        >
+          {TAB_STATUS.map((tab) => {
+            const aktif = tabAktif === tab.key;
+            const jumlah = hitung[tab.key] ?? 0;
 
-          return (
-            <Link
-              key={tab.key}
-              href={
-                tab.key === "semua"
-                  ? "/admin/orders"
-                  : `/admin/orders?status=${tab.key}`
-              }
-              aria-current={aktif ? "page" : undefined}
-              className={`shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full text-[12px] font-medium transition ${
-                aktif
-                  ? "bg-[#1E1C18] text-white"
-                  : "bg-white border border-[#E7E5E0] text-[#6B655A] hover:border-[#1E1C18]"
-              }`}
-            >
-              {tab.label}
-              {jumlah > 0 && (
-                <span
-                  className={`rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1 text-[10px] font-semibold ${
-                    aktif
-                      ? "bg-white/20 text-white"
-                      : "bg-[#F3EFE9] text-[#8B6B5A]"
-                  }`}
-                >
-                  {jumlah}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+            return (
+              <Link
+                key={tab.key}
+                href={hrefStatus(tab.key)}
+                aria-current={aktif ? "page" : undefined}
+                className={`shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full text-[12px] font-medium transition ${
+                  aktif
+                    ? "bg-[#1E1C18] text-white"
+                    : "bg-white border border-[#E7E5E0] text-[#6B655A] hover:border-[#1E1C18]"
+                }`}
+              >
+                {tab.label}
+                {jumlah > 0 && (
+                  <span
+                    className={`rounded-full min-w-[18px] h-[18px] inline-flex items-center justify-center px-1 text-[10px] font-semibold ${
+                      aktif
+                        ? "bg-white/20 text-white"
+                        : "bg-[#F3EFE9] text-[#8B6B5A]"
+                    }`}
+                  >
+                    {jumlah}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <SortSelect
+          value={sort}
+          options={SORT_PESANAN}
+          baseParams={{
+            status: tabAktif !== "semua" ? tabAktif : undefined,
+            dari: dari ?? undefined,
+            sampai: sampai ?? undefined,
+          }}
+          ariaLabel="Urutkan pesanan"
+        />
+      </div>
+
+      {/* ===== Filter rentang tanggal ===== */}
+      <Form
+        action="/admin/orders"
+        className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-[18px] border border-black/5 bg-white p-4 shadow-sm mb-5"
+      >
+        {tabAktif !== "semua" && (
+          <input type="hidden" name="status" value={tabAktif} />
+        )}
+        {sort !== "terbaru" && <input type="hidden" name="sort" value={sort} />}
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="dari"
+            className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9A7B69]"
+          >
+            Dari tanggal
+          </label>
+          <input
+            id="dari"
+            type="date"
+            name="dari"
+            defaultValue={dari ?? ""}
+            max={sampai ?? undefined}
+            aria-label="Dari tanggal"
+            className="h-10 rounded-full border border-[#E7E5E0] bg-white px-4 text-[13px] text-[#1E1C18] transition focus:outline-none focus:ring-1 focus:ring-[#8B6B5A] focus:border-[#8B6B5A]"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="sampai"
+            className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9A7B69]"
+          >
+            Sampai tanggal
+          </label>
+          <input
+            id="sampai"
+            type="date"
+            name="sampai"
+            defaultValue={sampai ?? ""}
+            min={dari ?? undefined}
+            aria-label="Sampai tanggal"
+            className="h-10 rounded-full border border-[#E7E5E0] bg-white px-4 text-[13px] text-[#1E1C18] transition focus:outline-none focus:ring-1 focus:ring-[#8B6B5A] focus:border-[#8B6B5A]"
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="h-10 rounded-full bg-[#1E1C18] px-6 text-[13px] font-semibold text-white transition hover:bg-[#8B6B5A]"
+        >
+          Terapkan
+        </button>
+
+        {adaFilterTanggal && (
+          <Link
+            href={hrefTanpaTanggal()}
+            className="h-10 inline-flex items-center justify-center px-2 text-[12px] font-medium text-[#8B6B5A] underline underline-offset-4 hover:text-[#1E1C18] transition"
+          >
+            Reset tanggal
+          </Link>
+        )}
+      </Form>
+
+      {(tanggalTidakValid || rentangTerbalik) && (
+        <p className="-mt-2 mb-5 text-[12px] text-[#8A2530]">
+          {tanggalTidakValid
+            ? "Format tanggal tidak valid. Gunakan format YYYY-MM-DD."
+            : "Tanggal mulai tidak boleh setelah tanggal akhir."}
+        </p>
+      )}
 
       {/* ===== Daftar ===== */}
       <div className="admin-card overflow-hidden">
@@ -316,16 +516,18 @@ export default async function AdminOrdersPage({
                     {IKON.pesanan}
                   </span>
                   <p className="mt-3 text-sm font-medium text-[#1E1C18]">
-                    {orders.length === 0
+                    {semuaOrders.length === 0
                       ? "Belum ada pesanan."
-                      : "Tidak ada pesanan dengan status ini."}
+                      : adaFilterTanggal
+                        ? "Tidak ada pesanan pada rentang tanggal ini."
+                        : "Tidak ada pesanan dengan status ini."}
                   </p>
                   <p className="mt-1 text-sm text-[#8A837B]">
-                    {orders.length === 0
+                    {semuaOrders.length === 0
                       ? "Pesanan yang masuk akan muncul di sini."
-                      : "Coba status lain atau lihat semua pesanan."}
+                      : "Coba ubah filter tanggal, status, atau lihat semua pesanan."}
                   </p>
-                  {orders.length > 0 && (
+                  {semuaOrders.length > 0 && (
                     <Link
                       href="/admin/orders"
                       className="inline-flex items-center justify-center mt-5 h-10 px-5 rounded-full bg-[#1E1C18] text-white text-[13px] font-semibold hover:bg-[#8B6B5A] transition"

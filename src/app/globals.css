@@ -15,10 +15,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Tema toko selalu terang. Tanpa ini, saat OS memakai dark mode, body
+   berubah hitam dan menyisakan kotak hitam di bawah area admin. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #f7f3ee;
+    --foreground: #1e1c18;
   }
 }
 
@@ -38,6 +40,42 @@ body {
 
 .site-gutter-x {
   padding-inline: var(--site-gutter);
+}
+
+/* Scrollbar tipis untuk area dengan inner scroll (sidebar akun, dsb.) */
+.inner-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30, 28, 24, 0.18) transparent;
+}
+
+.inner-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.inner-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.inner-scroll::-webkit-scrollbar-thumb {
+  background: rgba(30, 28, 24, 0.18);
+  border-radius: 999px;
+}
+
+.inner-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(30, 28, 24, 0.3);
+}
+
+/* Shell admin selalu pas setinggi layar. Hanya <main> yang boleh scroll,
+   supaya area krem tidak ikut turun dan melebihi sidebar pada halaman panjang
+   (mis. Tambah Produk). Fallback vh dipakai browser yang belum support dvh. */
+.admin-shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body:has(.admin-shell) {
+  overflow: hidden;
 }
 
 .admin-card {
@@ -88,4 +126,65 @@ body {
   padding: 14px 20px;
   border-top: 1px solid #efeae4;
   color: #1e1c18;
+}
+
+/* Cetak nota: sembunyikan kontrol halaman dan rapikan dua lembar nota agar
+   pas di A4. Tombol "Cetak" memakai dialog print native (Save as PDF). */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    background: #ffffff !important;
+  }
+
+  body {
+    display: block !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .nota-no-print {
+    display: none !important;
+  }
+
+  .nota-print-page {
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .nota-document {
+    max-width: none !important;
+  }
+
+  .nota-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .nota-sheet + .nota-sheet {
+    margin-top: 0 !important;
+    break-before: page;
+  }
+
+  .nota-sheet thead {
+    display: table-header-group;
+  }
+
+  .nota-sheet tr {
+    break-inside: avoid;
+  }
 }

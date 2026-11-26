@@ -144,6 +144,16 @@ export default function ChatWidget({
     return () => clearInterval(timer);
   }, [isSignedIn, conversationId, open, refreshMessages, refreshUnread]);
 
+  // ---------- Tutup panel dengan tombol Escape ----------
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   // ---------- Kirim pesan ----------
   async function handleSend() {
     const isi = input.trim();
@@ -227,8 +237,8 @@ export default function ChatWidget({
         <div
           role="dialog"
           aria-label={t("chat.bubbleLabel")}
-          className="fixed bottom-4 right-4 z-50 flex w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-[0_24px_60px_rgba(0,0,0,0.25)]"
-          style={{ height: "min(640px, calc(100dvh - 2rem))" }}
+          className="fixed bottom-4 right-4 z-[100] flex w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-[0_24px_60px_rgba(0,0,0,0.25)]"
+          style={{ height: "min(640px, calc(100dvh - 7rem))" }}
         >
           {/* Header */}
           <header className="flex items-center gap-3 bg-[#1E1C18] px-5 py-4 text-white">
@@ -247,7 +257,7 @@ export default function ChatWidget({
               type="button"
               onClick={() => setOpen(false)}
               aria-label={t("chat.close")}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+              className="relative z-10 flex h-9 w-9 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
             >
               <svg
                 width="18"

@@ -14,9 +14,6 @@ type Props = {
   gambar: string | null;
   selected: boolean;
   onToggleSelected: () => void;
-  // Jumlah produk ini yang mau di-checkout (hanya relevan kalau selected).
-  qtyCheckout: number;
-  onQtyCheckoutChange: (q: number) => void;
 };
 
 function formatHarga(angka: number) {
@@ -33,8 +30,6 @@ export default function CartItemRow({
   gambar,
   selected,
   onToggleSelected,
-  qtyCheckout,
-  onQtyCheckoutChange,
 }: Props) {
   const { t } = useI18n();
   const [isPending, startTransition] = useTransition();
@@ -90,7 +85,7 @@ export default function CartItemRow({
         )}
       </div>
 
-      <div className="flex-grow min-w-0">
+      <div className="flex flex-grow min-w-0 self-stretch flex-col justify-center">
         <p className="font-semibold text-sm text-[#222222] line-clamp-1">
           {nama}
         </p>
@@ -101,43 +96,6 @@ export default function CartItemRow({
         <p className="font-bold text-sm text-[#1E1C18] mt-2">
           {formatHarga(harga)}
         </p>
-
-        {selected && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] text-[#8B8478]">{t("cart.checkoutQty")}</span>
-            <div className="flex items-center border border-[#E7E5E0] rounded-full">
-              <button
-                type="button"
-                onClick={() => onQtyCheckoutChange(Math.max(1, qtyCheckout - 1))}
-                disabled={qtyCheckout <= 1}
-                aria-label={t("product.quantity") + " -"}
-                className="w-7 h-7 flex items-center justify-center text-[#4A4643] hover:bg-[#F0F0F0] rounded-l-full disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-              >
-                −
-              </button>
-              <span className="w-7 text-center text-xs font-medium">
-                {qtyCheckout}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  onQtyCheckoutChange(Math.min(quantity, qtyCheckout + 1))
-                }
-                disabled={qtyCheckout >= quantity}
-                aria-label={t("product.quantity") + " +"}
-                className="w-7 h-7 flex items-center justify-center text-[#4A4643] hover:bg-[#F0F0F0] rounded-r-full disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-              >
-                +
-              </button>
-            </div>
-            <span className="text-[10px] text-[#8B8478]">{t("cart.fromTotal", { total: quantity })}</span>
-            {qtyCheckout < quantity && (
-              <span className="text-[10px] text-[#A05245]">
-                {t("cart.remainingInCart", { count: quantity - qtyCheckout })}
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="flex items-center gap-3 shrink-0">

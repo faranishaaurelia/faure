@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getT, dateLocale } from "@/lib/i18n/server";
 import {
   formatTanggalWaktu,
+  infoPembayaran,
+  infoStatus,
   kodePesanan,
   labelMetodeBayar,
   rupiah,
@@ -36,7 +38,7 @@ export default async function CheckoutSuksesPage({
   const { data: order } = await supabase
     .from("orders")
     .select(
-      "id, total, payment_method, payment_deadline, created_at, order_items ( id )",
+      "id, status, total, payment_method, payment_status, payment_deadline, created_at, order_items ( id )",
     )
     .eq("id", orderId)
     .eq("user_id", user.id)
@@ -45,6 +47,10 @@ export default async function CheckoutSuksesPage({
   if (!order) {
     redirect("/pesanan");
   }
+
+  const statusPesanan = infoStatus(order.status, t);
+  const sudahBayar =
+    infoPembayaran(order.payment_status, statusPesanan.key, t).key === "dibayar";
 
   const jumlahItem = Array.isArray(order.order_items)
     ? order.order_items.length
@@ -110,6 +116,14 @@ export default async function CheckoutSuksesPage({
           </div>
 
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+            {sudahBayar && (
+              <Link
+                href={`/pesanan/${order.id}/nota`}
+                className="inline-flex items-center justify-center px-6 py-3 rounded-full bg-[#1A1A1A] text-white text-xs font-medium hover:bg-[#302D2A] transition"
+              >
+                {t("nota.viewNotes")}
+              </Link>
+            )}
             <Link
               href={`/pesanan/${order.id}`}
               className="inline-flex items-center justify-center px-6 py-3 rounded-full bg-[#1A1A1A] text-white text-xs font-medium hover:bg-[#302D2A] transition"

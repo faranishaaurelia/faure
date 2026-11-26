@@ -19,6 +19,14 @@ export default async function ProfilePage() {
     redirect("/login");
   }
 
+  const { data: profileRole } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const isAdmin = profileRole?.role === "admin";
+
   const name = user.user_metadata?.full_name ?? "";
   const phone = user.user_metadata?.phone ?? "";
   const alamat = user.user_metadata?.alamat ?? "";
@@ -63,63 +71,68 @@ export default async function ProfilePage() {
 
   return (
     <div>
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          <Link
-            href="/pesanan"
-            className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
-          >
-            <p className="text-2xl font-bold text-[#1E1C18]">
-              {jumlahPesanan ?? 0}
-            </p>
-            <p className="text-xs text-[#8B8478] mt-1">{t("account.myOrders")}</p>
-            <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
-              {t("account.viewOrders")}
-            </p>
-          </Link>
-          <Link
-            href="/lemari"
-            className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
-          >
-            <p className="text-2xl font-bold text-[#1E1C18]">
-              {jumlahLemari ?? 0}
-            </p>
-            <p className="text-xs text-[#8B8478] mt-1">{t("account.closetItems")}</p>
-            <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
-              {t("account.openCloset")}
-            </p>
-          </Link>
-          <Link
-            href="/outfit-saya"
-            className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
-          >
-            <p className="text-2xl font-bold text-[#1E1C18]">
-              {jumlahOutfit ?? 0}
-            </p>
-            <p className="text-xs text-[#8B8478] mt-1">{t("account.savedOutfits")}</p>
-            <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
-              {t("account.viewOutfits")}
-            </p>
-          </Link>
-          <Link
-            href="/chat"
-            className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
-          >
-            <p className="text-2xl font-bold text-[#1E1C18]">
-              {jumlahChat ?? 0}
-            </p>
-            <p className="text-xs text-[#8B8478] mt-1">{t("account.chatItems")}</p>
-            <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
-              {t("account.viewChat")}
-            </p>
-          </Link>
-          <div className="bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center col-span-2 sm:col-span-1">
-            <p className="text-2xl font-bold text-[#1E1C18]">
-              {daftarAlamat.length}
-            </p>
-            <p className="text-xs text-[#8B8478] mt-1">{t("account.addresses")}</p>
+      <div
+        className="space-y-6 overflow-y-auto pr-1 inner-scroll"
+        style={{ height: "min(680px, calc(100dvh - 220px))" }}
+      >
+        {!isAdmin && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            <Link
+              href="/pesanan"
+              className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
+            >
+              <p className="text-2xl font-bold text-[#1E1C18]">
+                {jumlahPesanan ?? 0}
+              </p>
+              <p className="text-xs text-[#8B8478] mt-1">{t("account.myOrders")}</p>
+              <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
+                {t("account.viewOrders")}
+              </p>
+            </Link>
+            <Link
+              href="/lemari"
+              className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
+            >
+              <p className="text-2xl font-bold text-[#1E1C18]">
+                {jumlahLemari ?? 0}
+              </p>
+              <p className="text-xs text-[#8B8478] mt-1">{t("account.closetItems")}</p>
+              <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
+                {t("account.openCloset")}
+              </p>
+            </Link>
+            <Link
+              href="/outfit-saya"
+              className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
+            >
+              <p className="text-2xl font-bold text-[#1E1C18]">
+                {jumlahOutfit ?? 0}
+              </p>
+              <p className="text-xs text-[#8B8478] mt-1">{t("account.savedOutfits")}</p>
+              <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
+                {t("account.viewOutfits")}
+              </p>
+            </Link>
+            <Link
+              href="/chat"
+              className="group bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center transition hover:border-[#1E1C18]/30 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#1E1C18]"
+            >
+              <p className="text-2xl font-bold text-[#1E1C18]">
+                {jumlahChat ?? 0}
+              </p>
+              <p className="text-xs text-[#8B8478] mt-1">{t("account.chatItems")}</p>
+              <p className="mt-2 text-[10px] font-medium text-[#1E1C18] opacity-60 group-hover:opacity-100 transition">
+                {t("account.viewChat")}
+              </p>
+            </Link>
+            <div className="bg-white rounded-[20px] border border-black/5 shadow-sm p-4 text-center col-span-2 sm:col-span-1">
+              <p className="text-2xl font-bold text-[#1E1C18]">
+                {daftarAlamat.length}
+              </p>
+              <p className="text-xs text-[#8B8478] mt-1">{t("account.addresses")}</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <ProfileForm
           name={name}

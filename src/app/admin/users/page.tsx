@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { formatTanggal } from "@/lib/orders";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import DeleteUserButton from "@/components/admin/DeleteUserButton";
 
 const styleSvg = {
   width: 18,
@@ -227,6 +228,7 @@ export default async function AdminUsersPage({
               <th>Telepon</th>
               <th>Role</th>
               <th>Bergabung</th>
+              <th className="text-right">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -254,12 +256,18 @@ export default async function AdminUsersPage({
                 <td className="whitespace-nowrap text-[#716A63]">
                   {user.created_at ? formatTanggal(user.created_at) : "-"}
                 </td>
+                <td className="text-right">
+                  <DeleteUserButton
+                    id={user.id}
+                    nama={user.full_name || "Pengguna"}
+                  />
+                </td>
               </tr>
             ))}
 
             {users.length === 0 && (
               <tr>
-                <td colSpan={4} className="text-center py-14">
+                <td colSpan={5} className="text-center py-14">
                   <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#F7F3EE] text-[#B7AEA3]">
                     {IKON.pengguna}
                   </span>

@@ -3,12 +3,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getT } from "@/lib/i18n/server";
+import { cancelTransaction } from "@/lib/midtrans";
 import { revalidatePath } from "next/cache";
-import {
-  STATUS_DB,
-  infoStatus,
-  infoPembayaran,
-} from "@/lib/orders";
+import { STATUS_DB, infoStatus, infoPembayaran } from "@/lib/orders";
+import { restoreOrderStock } from "@/lib/stock";
 
 // =====================================================
 // OPSI PENGIRIMAN & VOUCHER
@@ -33,11 +31,11 @@ const ALAMAT_LENGKAP = (a: {
 }) =>
   Boolean(
     a.recipient_name &&
-      a.phone &&
-      a.full_address &&
-      a.city &&
-      a.province &&
-      a.postal_code,
+    a.phone &&
+    a.full_address &&
+    a.city &&
+    a.province &&
+    a.postal_code,
   );
 
 export type CreateOrderInput = {
@@ -112,7 +110,11 @@ export async function createOrder(input: CreateOrderInput) {
   // Kalau cartItems diisi, hanya baris itu yang dibeli sebanyak yang diminta;
   // user_id tetap dipakai sebagai pembatas supaya tidak bisa akses milik orang.
   const pilih = (input.cartItems ?? []).filter(
-    (c) => Number.isInteger(c.id) && c.id > 0 && Number.isInteger(c.quantity) && c.quantity > 0,
+    (c) =>
+      Number.isInteger(c.id) &&
+      c.id > 0 &&
+      Number.isInteger(c.quantity) &&
+      c.quantity > 0,
   );
   const pilihMap = new Map(pilih.map((c) => [c.id, c.quantity]));
   const pilihIds = pilih.map((c) => c.id);
@@ -167,6 +169,7 @@ export async function createOrder(input: CreateOrderInput) {
       return {
         cartItemId: row.id,
         varianId: varian.id,
+        productId: produk.id,
         nama: produk.name,
         harga,
         jumlah,
@@ -174,10 +177,7 @@ export async function createOrder(input: CreateOrderInput) {
         stok: Number(varian.stock ?? 0),
       };
     })
-    .filter(
-      (i): i is NonNullable<typeof i> =>
-        i !== null && i.jumlah > 0,
-    );
+    .filter((i): i is NonNullable<typeof i> => i !== null && i.jumlah > 0);
 
   if (items.length === 0) {
     return { error: t("errors.cartEmpty"), orderId: null };
@@ -193,7 +193,9 @@ export async function createOrder(input: CreateOrderInput) {
 
   const kodeVoucher = input.voucherCode?.trim().toUpperCase() || null;
   const persenVoucher = kodeVoucher ? VOUCHER[kodeVoucher] : undefined;
-  const diskon = persenVoucher ? Math.round((subtotal * persenVoucher) / 100) : 0;
+  const diskon = persenVoucher
+    ? Math.round((subtotal * persenVoucher) / 100)
+    : 0;
 
   const total = subtotal + ongkir - diskon;
 
@@ -249,9 +251,15 @@ export async function createOrder(input: CreateOrderInput) {
 
   // ---------- Kurangi stok ----------
   for (const item of items) {
+    const { data: v } = await db
+      .from("product_variants")
+      .select("stock")
+      .eq("id", item.varianId)
+      .maybeSingle();
+    const currentStock = Number(v?.stock ?? item.stok);
     await db
       .from("product_variants")
-      .update({ stock: Math.max(0, item.stok - item.jumlah) })
+      .update({ stock: Math.max(0, currentStock - item.jumlah) })
       .eq("id", item.varianId);
   }
 
@@ -274,8 +282,16 @@ export async function createOrder(input: CreateOrderInput) {
   revalidatePath("/pesanan");
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
+  revalidatePath("/admin/products");
   revalidatePath(`/pesanan/${order.id}`);
   revalidatePath("/checkout/sukses");
+  revalidatePath("/produk");
+  revalidatePath("/produk/[id]", "page");
+  for (const item of items) {
+    if (item.productId) {
+      revalidatePath(`/produk/${item.productId}`);
+    }
+  }
 
   return { error: null, orderId: order.id };
 }
@@ -291,14 +307,19 @@ const BISA_DIBATALKAN: ReadonlySet<string> = new Set([
   "diproses",
 ]);
 
-async function revalidatePesanan(orderId: number) {
+async function revalidatePesanan(orderId: number, productIds: number[] = []) {
   revalidatePath(`/pesanan/${orderId}`);
   revalidatePath("/pesanan");
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/refunds");
+  revalidatePath("/admin/products");
   revalidatePath("/produk");
+  revalidatePath("/produk/[id]", "page");
+  for (const pid of productIds) {
+    revalidatePath(`/produk/${pid}`);
+  }
 }
 
 export async function cancelOrder(
@@ -322,7 +343,7 @@ export async function cancelOrder(
   // Fetch lewat sesi user → RLS memastikan pesanan milik user yang login.
   const { data: order } = await supabase
     .from("orders")
-    .select("id, status, payment_status, total")
+    .select("id, status, payment_status, total, midtrans_order_id")
     .eq("id", orderId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -337,10 +358,26 @@ export async function cancelOrder(
     return { error: t("errors.cancelNotAllowed") };
   }
 
+  // Batalkan juga di Midtrans supaya VA/QRIS tidak bisa dibayar lagi
+  if (!sudahBayar && order.midtrans_order_id) {
+    const res = await cancelTransaction(order.midtrans_order_id);
+    const kode = String(res.status_code);
+    // 200 = berhasil dibatalkan, 404 = user belum memilih metode bayar
+    if (kode !== "200" && kode !== "404") {
+      return {
+        error:
+          "Pesanan tidak bisa dibatalkan karena pembayaran sedang diproses. Muat ulang halaman.",
+      };
+    }
+  }
+
   // Tulis pakai service-role: sesi user tidak punya izin tulis orders.
   const db = createAdminClient();
 
-  const { error: updateError } = await db
+  // Update bersyarat: hanya pesanan yang belum dibatalkan yang boleh memicu
+  // pemulihan stok. Ini mencegah stok bertambah dua kali kalau webhook dan
+  // aksi user/admin bersamaan.
+  const { data: updated, error: updateError } = await db
     .from("orders")
     .update({
       status: STATUS_DB.dibatalkan,
@@ -350,9 +387,17 @@ export async function cancelOrder(
       cancelled_by: user.id,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", order.id);
+    .eq("id", order.id)
+    .neq("status", STATUS_DB.dibatalkan)
+    .select("id");
 
   if (updateError) return { error: updateError.message };
+  if (!updated || updated.length === 0) {
+    return { error: t("errors.cancelNotAllowed") };
+  }
+
+  // Pulihkan stok produk untuk setiap item pesanan yang dibatalkan
+  const affectedProductIds = await restoreOrderStock(order.id, db);
 
   // Kalau sudah dibayar, otomatis dibuat pengajuan pengembalian dana.
   let refundDibuat = false;
@@ -367,7 +412,7 @@ export async function cancelOrder(
     refundDibuat = !refundError;
   }
 
-  revalidatePesanan(order.id);
+  revalidatePesanan(order.id, affectedProductIds);
 
   return {
     error: null,

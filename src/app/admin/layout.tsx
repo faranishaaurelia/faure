@@ -38,13 +38,15 @@ export default async function AdminLayout({
     ]);
 
   return (
-    <div className="min-h-screen flex bg-[#F7F3EE] text-[#1E1C18]">
+    <div className="admin-shell flex overflow-hidden bg-[#F7F3EE] text-[#1E1C18]">
       <AdminSidebar
         displayName={profile?.full_name ?? user.email ?? "Admin"}
         refundPending={refundMenunggu ?? 0}
         chatUnread={chatUnread ?? 0}
       />
-      <main className="flex-1 min-w-0 px-6 md:px-10 py-8">{children}</main>
+      <main className="inner-scroll h-full min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
+        {children}
+      </main>
     </div>
   );
 }
